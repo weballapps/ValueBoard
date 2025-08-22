@@ -6,6 +6,10 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 import warnings
+import concurrent.futures
+import threading
+from functools import lru_cache
+import time
 warnings.filterwarnings('ignore')
 
 class ValueInvestmentAnalyzer:
@@ -16,6 +20,8 @@ class ValueInvestmentAnalyzer:
         self.financials = None
         self.balance_sheet = None
         self.cashflow = None
+        self._stock_cache = {}  # Cache for stock data
+        self._cache_lock = threading.Lock()  # Thread safety for cache
     
     def search_ticker_by_name(self, company_name):
         """Search for ticker symbol by company name using multiple approaches"""
@@ -2020,11 +2026,352 @@ class ValueInvestmentAnalyzer:
         
         return value_scores[:30]  # Return top 30 value stocks
     
+    def fetch_stock_data_cached(self, symbol, max_age_minutes=30):
+        """Fetch stock data with caching to avoid repeated API calls"""
+        with self._cache_lock:
+            current_time = time.time()
+            
+            # Check if we have cached data that's still fresh
+            if symbol in self._stock_cache:
+                cached_data, timestamp = self._stock_cache[symbol]
+                if current_time - timestamp < max_age_minutes * 60:
+                    # Use cached data
+                    self.stock_data = cached_data.get('stock_data')
+                    self.stock_info = cached_data.get('stock_info')
+                    self.financials = cached_data.get('financials')
+                    self.balance_sheet = cached_data.get('balance_sheet')
+                    self.cashflow = cached_data.get('cashflow')
+                    return True
+            
+            # Fetch fresh data
+            if self.fetch_stock_data(symbol):
+                # Cache the results
+                self._stock_cache[symbol] = ({
+                    'stock_data': self.stock_data,
+                    'stock_info': self.stock_info,
+                    'financials': self.financials,
+                    'balance_sheet': self.balance_sheet,
+                    'cashflow': self.cashflow
+                }, current_time)
+                return True
+            
+            return False
+    
+    def process_single_stock_for_screening(self, symbol_data, screening_params):
+        """Process a single stock for screening - thread-safe"""
+        symbol, company_name = symbol_data
+        screening_type = screening_params['type']
+        
+        try:
+            # Create a temporary analyzer instance for thread safety
+            temp_analyzer = ValueInvestmentAnalyzer()
+            
+            if temp_analyzer.fetch_stock_data_cached(symbol):
+                if screening_type == 'value':
+                    score_data = temp_analyzer.calculate_value_score_configurable(
+                        symbol, company_name, **screening_params['params']
+                    )
+                elif screening_type == 'growth':
+                    score_data = temp_analyzer.calculate_growth_score_configurable(
+                        symbol, company_name, **screening_params['params']
+                    )
+                elif screening_type == 'valuegrowth':
+                    score_data = temp_analyzer.calculate_valuegrowth_score_configurable(
+                        symbol, company_name, **screening_params['params']
+                    )
+                else:
+                    return None
+                
+                return score_data
+        except Exception:
+            pass
+        
+        return None
+    
+    def screen_stocks_parallel(self, stock_universe, screening_params, max_workers=8):
+        """Screen stocks in parallel for better performance"""
+        results = []
+        
+        # Convert to list of tuples for parallel processing
+        stock_items = list(stock_universe.items())
+        
+        # Use ThreadPoolExecutor for parallel processing
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_stock = {
+                executor.submit(self.process_single_stock_for_screening, stock_data, screening_params): stock_data
+                for stock_data in stock_items
+            }
+            
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed(future_to_stock):
+                try:
+                    result = future.result(timeout=30)  # 30 second timeout per stock
+                    if result:
+                        results.append(result)
+                except concurrent.futures.TimeoutError:
+                    continue
+                except Exception:
+                    continue
+        
+        # Sort by score
+        score_key = 'total_score' if results and 'total_score' in results[0] else 'score'
+        results.sort(key=lambda x: x.get(score_key, 0), reverse=True)
+        
+        return results[:50]  # Return top 50 results
+    
+    def calculate_growth_score_configurable(self, symbol, company_name, 
+                                          min_market_cap_millions=100, max_market_cap_billions=5000,
+                                          min_revenue_growth_percent=10.0, min_earnings_growth_percent=15.0,
+                                          min_roe_percent=15.0, min_operating_margin_percent=10.0,
+                                          max_peg_ratio=2.0, max_ps_ratio=10.0):
+        """Calculate growth score with configurable parameters - optimized version"""
+        if not self.stock_info:
+            return None
+            
+        try:
+            current_price = self.stock_info.get('currentPrice', 0)
+            market_cap = self.stock_info.get('marketCap', 0)
+            
+            # Apply market cap filters early
+            min_market_cap = min_market_cap_millions * 1e6
+            max_market_cap = max_market_cap_billions * 1e9 if max_market_cap_billions < 5000 else float('inf')
+            
+            if not current_price or not market_cap or market_cap < min_market_cap or market_cap > max_market_cap:
+                return None
+            
+            # Quick scoring system for growth stocks
+            score = 0
+            max_score = 100
+            
+            # Revenue growth (30 points)
+            revenue_growth = self.stock_info.get('revenueGrowth', 0)
+            if revenue_growth:
+                revenue_growth_percent = revenue_growth * 100 if revenue_growth < 1 else revenue_growth
+                if revenue_growth_percent > min_revenue_growth_percent * 2:
+                    score += 30
+                elif revenue_growth_percent > min_revenue_growth_percent * 1.5:
+                    score += 20
+                elif revenue_growth_percent > min_revenue_growth_percent:
+                    score += 10
+            
+            # Earnings growth (25 points)
+            earnings_growth = self.stock_info.get('earningsGrowth', 0)
+            if earnings_growth:
+                earnings_growth_percent = earnings_growth * 100 if earnings_growth < 1 else earnings_growth
+                if earnings_growth_percent > min_earnings_growth_percent * 2:
+                    score += 25
+                elif earnings_growth_percent > min_earnings_growth_percent * 1.5:
+                    score += 18
+                elif earnings_growth_percent > min_earnings_growth_percent:
+                    score += 10
+            
+            # ROE (20 points)
+            roe = self.stock_info.get('returnOnEquity', 0)
+            if roe:
+                roe_percent = roe * 100 if roe < 1 else roe
+                if roe_percent > min_roe_percent * 2:
+                    score += 20
+                elif roe_percent > min_roe_percent * 1.5:
+                    score += 15
+                elif roe_percent > min_roe_percent:
+                    score += 8
+            
+            # Operating margin (15 points)
+            operating_margin = self.stock_info.get('operatingMargins', 0)
+            if operating_margin:
+                margin_percent = operating_margin * 100 if operating_margin < 1 else operating_margin
+                if margin_percent > min_operating_margin_percent * 2:
+                    score += 15
+                elif margin_percent > min_operating_margin_percent:
+                    score += 8
+            
+            # PEG ratio (10 points)
+            peg_ratio = self.stock_info.get('pegRatio', 0)
+            if peg_ratio and peg_ratio > 0 and peg_ratio < max_peg_ratio:
+                if peg_ratio < 1.0:
+                    score += 10
+                elif peg_ratio < 1.5:
+                    score += 6
+                else:
+                    score += 3
+            
+            # Calculate percentage score
+            percentage_score = (score / max_score) * 100
+            
+            # Market classification
+            market = 'European' if '.' in symbol else 'US'
+            
+            # Market cap category
+            if market_cap > 50e9:
+                cap_category = 'Large Cap'
+            elif market_cap > 2e9:
+                cap_category = 'Mid Cap'
+            elif market_cap > 300e6:
+                cap_category = 'Small Cap'
+            else:
+                cap_category = 'Micro Cap'
+            
+            return {
+                'symbol': symbol,
+                'company': company_name,
+                'current_price': current_price,
+                'market_cap': market_cap,
+                'market': market,
+                'cap_category': cap_category,
+                'total_score': score,
+                'max_score': max_score,
+                'percentage_score': percentage_score,
+                'revenue_growth': revenue_growth,
+                'earnings_growth': earnings_growth,
+                'roe': roe,
+                'operating_margin': operating_margin,
+                'peg_ratio': peg_ratio
+            }
+            
+        except Exception:
+            return None
+    
+    def _get_comprehensive_stock_universe(self):
+        """Get comprehensive stock universe for screening"""
+        return {
+            # US Large Cap
+            'AAPL': 'Apple Inc.',
+            'MSFT': 'Microsoft Corporation', 
+            'GOOGL': 'Alphabet Inc.',
+            'AMZN': 'Amazon.com Inc.',
+            'NVDA': 'NVIDIA Corporation',
+            'TSLA': 'Tesla Inc.',
+            'META': 'Meta Platforms Inc.',
+            'BRK-B': 'Berkshire Hathaway Inc.',
+            'JNJ': 'Johnson & Johnson',
+            'WMT': 'Walmart Inc.',
+            'JPM': 'JPMorgan Chase & Co.',
+            'PG': 'Procter & Gamble',
+            'UNH': 'UnitedHealth Group',
+            'HD': 'Home Depot',
+            'MA': 'Mastercard Inc.',
+            'BAC': 'Bank of America',
+            'ABBV': 'AbbVie Inc.',
+            'AVGO': 'Broadcom Inc.',
+            'PFE': 'Pfizer Inc.',
+            'KO': 'Coca-Cola Company',
+            'COST': 'Costco Wholesale',
+            'PEP': 'PepsiCo Inc.',
+            'TMO': 'Thermo Fisher Scientific',
+            'ABT': 'Abbott Laboratories',
+            'CSCO': 'Cisco Systems',
+            'ACN': 'Accenture plc',
+            'LLY': 'Eli Lilly and Company',
+            'INTC': 'Intel Corporation',
+            'VZ': 'Verizon Communications',
+            'ADBE': 'Adobe Inc.',
+            'NKE': 'Nike Inc.',
+            'CRM': 'Salesforce Inc.',
+            'T': 'AT&T Inc.',
+            'MRK': 'Merck & Co.',
+            'NFLX': 'Netflix Inc.',
+            'ORCL': 'Oracle Corporation',
+            'XOM': 'Exxon Mobil Corporation',
+            'WFC': 'Wells Fargo & Company',
+            'CVX': 'Chevron Corporation',
+            'LIN': 'Linde plc',
+            'AMD': 'Advanced Micro Devices',
+            'DHR': 'Danaher Corporation',
+            'IBM': 'International Business Machines',
+            'GE': 'General Electric',
+            
+            # US Mid-Cap
+            'ZM': 'Zoom Video Communications',
+            'SQ': 'Block Inc.',
+            'ROKU': 'Roku Inc.',
+            'SHOP': 'Shopify Inc.',
+            'COIN': 'Coinbase Global Inc.',
+            'SNOW': 'Snowflake Inc.',
+            'ZS': 'Zscaler Inc.',
+            'NET': 'Cloudflare Inc.',
+            'TWLO': 'Twilio Inc.',
+            'DOCU': 'DocuSign Inc.',
+            'OKTA': 'Okta Inc.',
+            'DDOG': 'Datadog Inc.',
+            'MDB': 'MongoDB Inc.',
+            'CZR': 'Caesars Entertainment',
+            'RBLX': 'Roblox Corporation',
+            'U': 'Unity Software Inc.',
+            'PLTR': 'Palantir Technologies',
+            
+            # European Large Cap
+            'ASML.AS': 'ASML Holding N.V. (Netherlands)',
+            'SAP.DE': 'SAP SE (Germany)',
+            'NESN.SW': 'Nestlé S.A. (Switzerland)',
+            'NOVN.SW': 'Novartis AG (Switzerland)',
+            'ROG.SW': 'Roche Holding AG (Switzerland)',
+            'LVMH.PA': 'LVMH Moët Hennessy Louis Vuitton (France)',
+            'MC.PA': 'LVMH Group (France)',
+            'OR.PA': 'L\'Oréal S.A. (France)',
+            'SAN.PA': 'Sanofi S.A. (France)',
+            'TTE.PA': 'TotalEnergies SE (France)',
+            'AIR.PA': 'Airbus SE (France)',
+            'BNP.PA': 'BNP Paribas (France)',
+            'AZN.L': 'AstraZeneca PLC (UK)',
+            'SHEL.L': 'Shell plc (UK)',
+            'ULVR.L': 'Unilever PLC (UK)',
+            'BP.L': 'BP plc (UK)',
+            'VOD.L': 'Vodafone Group Plc (UK)',
+            'GSK.L': 'GSK plc (UK)',
+            'BT-A.L': 'BT Group plc (UK)',
+            'LLOY.L': 'Lloyds Banking Group (UK)',
+            'BARC.L': 'Barclays PLC (UK)',
+            'ALV.DE': 'Allianz SE (Germany)',
+            'SIE.DE': 'Siemens AG (Germany)',
+            'BAS.DE': 'BASF SE (Germany)',
+            'BMW.DE': 'Bayerische Motoren Werke AG (Germany)',
+            'VOW3.DE': 'Volkswagen AG (Germany)',
+            'ENEL.MI': 'Enel S.p.A. (Italy)',
+            'ENI.MI': 'Eni S.p.A. (Italy)',
+            'ISP.MI': 'Intesa Sanpaolo (Italy)',
+            'UCG.MI': 'UniCredit S.p.A. (Italy)',
+            'SAN.MC': 'Banco Santander (Spain)',
+            'BBVA.MC': 'Banco Bilbao Vizcaya Argentaria (Spain)',
+            'ITX.MC': 'Inditex (Spain)',
+            'IBE.MC': 'Iberdrola (Spain)',
+            'TEF.MC': 'Telefónica (Spain)',
+            'REP.MC': 'Repsol (Spain)',
+            'VIS.MC': 'Viscofan SA (Spain)'
+        }
+    
     def screen_value_stocks_configurable(self, min_market_cap_millions=100, max_market_cap_billions=5000, 
                                        max_pe_ratio=20.0, max_pb_ratio=2.0, min_roe_percent=10.0,
                                        max_debt_equity_percent=100.0, min_current_ratio=1.0, 
                                        min_fcf_yield_percent=2.0):
-        """Screen value stocks with configurable parameters"""
+        """Screen value stocks with configurable parameters - OPTIMIZED with parallel processing"""
+        
+        # Use comprehensive stock universe
+        stock_universe = self._get_comprehensive_stock_universe()
+        
+        # Set up parameters for parallel processing
+        screening_params = {
+            'type': 'value',
+            'params': {
+                'min_market_cap_millions': min_market_cap_millions,
+                'max_market_cap_billions': max_market_cap_billions,
+                'max_pe_ratio': max_pe_ratio,
+                'max_pb_ratio': max_pb_ratio,
+                'min_roe_percent': min_roe_percent,
+                'max_debt_equity_percent': max_debt_equity_percent,
+                'min_current_ratio': min_current_ratio,
+                'min_fcf_yield_percent': min_fcf_yield_percent
+            }
+        }
+        
+        # Use parallel processing
+        return self.screen_stocks_parallel(stock_universe, screening_params)
+    
+    def screen_value_stocks_configurable_old(self, min_market_cap_millions=100, max_market_cap_billions=5000, 
+                                       max_pe_ratio=20.0, max_pb_ratio=2.0, min_roe_percent=10.0,
+                                       max_debt_equity_percent=100.0, min_current_ratio=1.0, 
+                                       min_fcf_yield_percent=2.0):
+        """Screen value stocks with configurable parameters - ORIGINAL (SLOW) VERSION"""
         
         # Use the same comprehensive stock universe as the original function
         stock_universe = {
@@ -2344,7 +2691,34 @@ class ValueInvestmentAnalyzer:
                                         min_revenue_growth_percent=10.0, min_earnings_growth_percent=15.0,
                                         min_roe_percent=15.0, min_operating_margin_percent=10.0,
                                         max_peg_ratio=2.0, max_ps_ratio=10.0):
-        """Screen growth stocks with configurable parameters"""
+        """Screen growth stocks with configurable parameters - OPTIMIZED with parallel processing"""
+        
+        # Use comprehensive stock universe
+        stock_universe = self._get_comprehensive_stock_universe()
+        
+        # Set up parameters for parallel processing
+        screening_params = {
+            'type': 'growth',
+            'params': {
+                'min_market_cap_millions': min_market_cap_millions,
+                'max_market_cap_billions': max_market_cap_billions,
+                'min_revenue_growth_percent': min_revenue_growth_percent,
+                'min_earnings_growth_percent': min_earnings_growth_percent,
+                'min_roe_percent': min_roe_percent,
+                'min_operating_margin_percent': min_operating_margin_percent,
+                'max_peg_ratio': max_peg_ratio,
+                'max_ps_ratio': max_ps_ratio
+            }
+        }
+        
+        # Use parallel processing
+        return self.screen_stocks_parallel(stock_universe, screening_params)
+    
+    def screen_growth_stocks_configurable_old(self, min_market_cap_millions=100, max_market_cap_billions=5000,
+                                        min_revenue_growth_percent=10.0, min_earnings_growth_percent=15.0,
+                                        min_roe_percent=15.0, min_operating_margin_percent=10.0,
+                                        max_peg_ratio=2.0, max_ps_ratio=10.0):
+        """Screen growth stocks with configurable parameters - ORIGINAL (SLOW) VERSION"""
         
         # Use the existing screen_growth_stocks function but with filtering
         original_results = self.screen_growth_stocks()
@@ -2392,31 +2766,29 @@ class ValueInvestmentAnalyzer:
         # Use the expanded stock universe from the original functions
         stock_universe = self._get_comprehensive_stock_universe()
         
-        valuegrowth_scores = []
+        # Set up parameters for parallel processing
+        screening_params = {
+            'type': 'valuegrowth',
+            'params': {
+                'min_market_cap_millions': min_market_cap_millions,
+                'max_market_cap_billions': max_market_cap_billions,
+                'max_pe_ratio': max_pe_ratio,
+                'max_pb_ratio': max_pb_ratio,
+                'max_debt_equity_percent': max_debt_equity_percent,
+                'min_revenue_growth_percent': min_revenue_growth_percent,
+                'min_earnings_growth_percent': min_earnings_growth_percent,
+                'max_peg_ratio': max_peg_ratio,
+                'min_roe_percent': min_roe_percent,
+                'min_operating_margin_percent': min_operating_margin_percent,
+                'min_current_ratio': min_current_ratio,
+                'max_ps_ratio': max_ps_ratio,
+                'min_fcf_yield_percent': min_fcf_yield_percent,
+                'min_gross_margin_percent': min_gross_margin_percent
+            }
+        }
         
-        for symbol, company_name in stock_universe.items():
-            try:
-                # Fetch stock data
-                if self.fetch_stock_data(symbol):
-                    score_data = self.calculate_valuegrowth_score_configurable(
-                        symbol, company_name, 
-                        min_market_cap_millions, max_market_cap_billions,
-                        max_pe_ratio, max_pb_ratio, max_debt_equity_percent,
-                        min_revenue_growth_percent, min_earnings_growth_percent,
-                        max_peg_ratio, min_roe_percent, min_operating_margin_percent,
-                        min_current_ratio, max_ps_ratio, min_fcf_yield_percent,
-                        min_gross_margin_percent
-                    )
-                    if score_data:
-                        valuegrowth_scores.append(score_data)
-                        
-            except Exception:
-                continue
-        
-        # Sort by valuegrowth score (descending)
-        valuegrowth_scores.sort(key=lambda x: x['total_score'], reverse=True)
-        
-        return valuegrowth_scores[:50]  # Return top 50 valuegrowth stocks
+        # Use parallel processing
+        return self.screen_stocks_parallel(stock_universe, screening_params)
     
     def _get_comprehensive_stock_universe(self):
         """Get the full stock universe (helper function to avoid duplication)"""
