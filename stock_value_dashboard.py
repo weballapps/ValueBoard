@@ -4368,6 +4368,11 @@ def main():
     st.title("📈 Stock Value Investment Dashboard")
     st.markdown("Comprehensive analysis platform for American and European stocks and ETFs")
     
+    # Add timestamp for tracking updates
+    from datetime import datetime
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+    st.markdown(f"<small style='color: gray;'>Last updated: {current_time}</small>", unsafe_allow_html=True)
+    
     # Initialize session state for tab switching
     if 'main_tab_index' not in st.session_state:
         st.session_state.main_tab_index = 0
