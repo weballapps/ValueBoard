@@ -4753,34 +4753,37 @@ def main():
             if os.path.exists('build_info.json'):
                 with open('build_info.json', 'r') as f:
                     build_info = json.load(f)
-                    return build_info.get('last_update', ''), build_info.get('update_source', 'build file')
-        except:
+                    last_update = build_info.get('last_update', '')
+                    update_source = build_info.get('update_source', 'build file')
+                    if last_update:
+                        return last_update, f"{update_source} (production)"
+        except Exception:
             pass
         
-        # Fallback: Try to get git commit timestamp directly
+        # Development mode: Try to get git commit timestamp directly
         try:
             result = subprocess.run(['git', 'log', '-1', '--format=%ci'], 
                                   capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 commit_time_str = result.stdout.strip().split(' +')[0]  # Remove timezone
                 commit_time = datetime.strptime(commit_time_str, "%Y-%m-%d %H:%M:%S")
-                return commit_time.strftime("%Y-%m-%d %H:%M"), "git commit"
+                return commit_time.strftime("%Y-%m-%d %H:%M"), "git commit (dev)"
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, ValueError):
             pass
         
-        # Fallback: Use main Python file modification time
+        # Development fallback: Use main Python file modification time
         try:
             main_file_path = __file__
             if os.path.exists(main_file_path):
                 mod_time = os.path.getmtime(main_file_path)
                 file_time = datetime.fromtimestamp(mod_time)
-                return file_time.strftime("%Y-%m-%d %H:%M"), "file modified"
-        except:
+                return file_time.strftime("%Y-%m-%d %H:%M"), "file modified (dev)"
+        except Exception:
             pass
         
         # Final fallback: Current time
         current_time = datetime.now()
-        return current_time.strftime("%Y-%m-%d %H:%M"), "page load"
+        return current_time.strftime("%Y-%m-%d %H:%M"), "live session"
     
     build_time, time_source = get_build_timestamp()
     st.markdown(f"<small style='color: gray;'>Last updated: {build_time} ({time_source})</small>", unsafe_allow_html=True)
