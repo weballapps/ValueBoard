@@ -271,6 +271,74 @@ class ValueInvestmentAnalyzer:
                 'spotify': 'SPOT',  # Listed on NYSE but Swedish
                 'equinor': 'EQNR.OL',
                 'telenor': 'TEL.OL',
+                
+                # Asian Companies
+                
+                # Japan
+                'toyota': '7203.T',
+                'sony': '6758.T',
+                'nintendo': '7974.T',
+                'softbank': '9984.T',
+                'honda': '7267.T',
+                'panasonic': '6752.T',
+                'mitsubishi': '8058.T',
+                'kddi': '9433.T',
+                'ntt': '9432.T',
+                'rakuten': '4755.T',
+                'keyence': '6861.T',
+                'nissan': '7201.T',
+                'canon': '7751.T',
+                'olympus': '7733.T',
+                'mazda': '7261.T',
+                'yamaha': '7951.T',
+                
+                # China (Hong Kong Listed)
+                'alibaba': '9988.HK',
+                'tencent': '0700.HK',
+                'xiaomi': '1810.HK',
+                'meituan': '3690.HK',
+                'byd': '1211.HK',
+                'china mobile': '0941.HK',
+                'ping an': '2318.HK',
+                'icbc': '1398.HK',
+                'china construction bank': '0939.HK',
+                'netease': '9999.HK',
+                'jd.com': '9618.HK',
+                'baidu': '9888.HK',
+                'nio': '9866.HK',
+                'li auto': '2015.HK',
+                'xpeng': '9868.HK',
+                
+                # South Korea
+                'samsung electronics': '005930.KS',
+                'sk hynix': '000660.KS',
+                'lg chem': '051910.KS',
+                'hyundai motor': '005380.KS',
+                'kia': '000270.KS',
+                'lg electronics': '066570.KS',
+                'naver': '035420.KS',
+                'kakao': '035720.KS',
+                
+                # Taiwan
+                'tsmc': '2330.TW',
+                'foxconn': '2317.TW',
+                'mediatek': '2454.TW',
+                'asus': '2357.TW',
+                'acer': '2353.TW',
+                
+                # Singapore
+                'dbs': 'D05.SI',
+                'uob': 'U11.SI',
+                'ocbc': 'O39.SI',
+                'singtel': 'Z74.SI',
+                'sea limited': 'SE',
+                'grab': 'GRAB',
+                
+                # India (NYSE/NASDAQ listed)
+                'infosys': 'INFY',
+                'wipro': 'WIT',
+                'tata motors': 'TTM',
+                'icici bank': 'IBN',
             }
             
             # Normalize the input company name
@@ -318,13 +386,18 @@ class ValueInvestmentAnalyzer:
                 normalized_input.upper(),
             ]
             
-            # Add European exchange suffixes for direct searches
-            european_suffixes = ['.DE', '.PA', '.L', '.SW', '.AS', '.MI', '.MC', '.CO', '.HE', '.ST', '.OL']
+            # Add global exchange suffixes for direct searches
+            global_suffixes = [
+                # European
+                '.DE', '.PA', '.L', '.SW', '.AS', '.MI', '.MC', '.CO', '.HE', '.ST', '.OL',
+                # Asian
+                '.T', '.HK', '.KS', '.TW', '.SI'
+            ]
             extended_candidates = ticker_candidates.copy()
             
             for candidate in ticker_candidates:
-                for suffix in european_suffixes:
-                    if not candidate.endswith(tuple(european_suffixes)):
+                for suffix in global_suffixes:
+                    if not candidate.endswith(tuple(global_suffixes)):
                         extended_candidates.append(candidate + suffix)
             
             # Test candidates with timeout and error handling
@@ -346,6 +419,237 @@ class ValueInvestmentAnalyzer:
             return None
         except:
             return None
+    
+    def advanced_company_search(self, company_name, max_results=10):
+        """Advanced search that returns multiple matching companies with tickers"""
+        try:
+            import requests
+            import unicodedata
+            
+            def normalize_name(name):
+                """Remove accents and normalize company name"""
+                normalized = unicodedata.normalize('NFD', name.lower())
+                ascii_name = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+                return ascii_name.strip()
+            
+            matches = []
+            
+            # Method 1: Yahoo Finance Search API for comprehensive results
+            try:
+                search_url = "https://query2.finance.yahoo.com/v1/finance/search"
+                params = {
+                    'q': company_name,
+                    'quotesCount': max_results * 2,  # Get more to filter better matches
+                    'newsCount': 0,
+                    'listsCount': 0
+                }
+                
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                
+                response = requests.get(search_url, params=params, headers=headers, timeout=10)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    quotes = data.get('quotes', [])
+                    
+                    query_lower = company_name.lower()
+                    
+                    for quote in quotes:
+                        symbol = quote.get('symbol', '')
+                        long_name = quote.get('longname', '')
+                        short_name = quote.get('shortname', '')
+                        exchange = quote.get('exchange', '')
+                        quote_type = quote.get('quoteType', '')
+                        
+                        # Filter for stocks only (exclude ETFs, futures, etc.)
+                        if quote_type not in ['EQUITY', 'ETF']:
+                            continue
+                            
+                        # Skip if missing essential data
+                        if not symbol or not (long_name or short_name):
+                            continue
+                        
+                        # Calculate match score
+                        name_lower = long_name.lower()
+                        short_lower = short_name.lower()
+                        
+                        match_score = 0
+                        display_name = long_name if long_name else short_name
+                        
+                        # Exact match
+                        if query_lower == name_lower or query_lower == short_lower:
+                            match_score = 100
+                        # Starts with query
+                        elif name_lower.startswith(query_lower) or short_lower.startswith(query_lower):
+                            match_score = 90
+                        # Contains query
+                        elif query_lower in name_lower or query_lower in short_lower:
+                            match_score = 80
+                        # Word match
+                        elif any(word in name_lower.split() for word in query_lower.split() if len(word) > 2):
+                            match_score = 70
+                        else:
+                            continue  # Skip poor matches
+                        
+                        # Boost score for major exchanges
+                        if exchange in ['NMS', 'NYQ', 'NYSE', 'NASDAQ']:
+                            match_score += 5
+                        
+                        matches.append({
+                            'symbol': symbol,
+                            'name': display_name,
+                            'exchange': exchange,
+                            'type': quote_type,
+                            'score': match_score
+                        })
+            
+            except Exception as e:
+                pass  # Continue with other methods if API fails
+            
+            # Method 2: Check our comprehensive mapping for additional matches
+            common_mappings = {
+                # US Companies
+                'apple': ('AAPL', 'Apple Inc.'),
+                'microsoft': ('MSFT', 'Microsoft Corporation'),
+                'google': ('GOOGL', 'Alphabet Inc.'),
+                'alphabet': ('GOOGL', 'Alphabet Inc.'),
+                'amazon': ('AMZN', 'Amazon.com Inc.'),
+                'tesla': ('TSLA', 'Tesla Inc.'),
+                'meta': ('META', 'Meta Platforms Inc.'),
+                'facebook': ('META', 'Meta Platforms Inc.'),
+                'nvidia': ('NVDA', 'NVIDIA Corporation'),
+                'berkshire hathaway': ('BRK-B', 'Berkshire Hathaway Inc.'),
+                
+                # European Companies
+                'asml': ('ASML.AS', 'ASML Holding N.V.'),
+                'sap': ('SAP.DE', 'SAP SE'),
+                'siemens': ('SIE.DE', 'Siemens AG'),
+                'nestle': ('NESN.SW', 'Nestlé S.A.'),
+                'roche': ('ROG.SW', 'Roche Holding AG'),
+                'novartis': ('NOVN.SW', 'Novartis AG'),
+                'lvmh': ('MC.PA', 'LVMH Moët Hennessy Louis Vuitton SE'),
+                'total': ('TTE.PA', 'TotalEnergies SE'),
+                'airbus': ('AIR.PA', 'Airbus SE'),
+                'shell': ('SHEL.L', 'Shell plc'),
+                'unilever': ('ULVR.L', 'Unilever PLC'),
+                'astrazeneca': ('AZN.L', 'AstraZeneca PLC'),
+                'ferrari': ('RACE.MI', 'Ferrari N.V.'),
+                'novo nordisk': ('NOVO-B.CO', 'Novo Nordisk A/S'),
+                'spotify': ('SPOT', 'Spotify Technology S.A.'),
+                
+                # Asian Companies
+                
+                # Japan
+                'toyota': ('7203.T', 'Toyota Motor Corporation'),
+                'sony': ('6758.T', 'Sony Group Corporation'),
+                'nintendo': ('7974.T', 'Nintendo Co., Ltd.'),
+                'softbank': ('9984.T', 'SoftBank Group Corp.'),
+                'honda': ('7267.T', 'Honda Motor Co., Ltd.'),
+                'panasonic': ('6752.T', 'Panasonic Holdings Corporation'),
+                'mitsubishi': ('8058.T', 'Mitsubishi Corporation'),
+                'kddi': ('9433.T', 'KDDI Corporation'),
+                'ntt': ('9432.T', 'Nippon Telegraph and Telephone Corporation'),
+                'rakuten': ('4755.T', 'Rakuten Group, Inc.'),
+                'keyence': ('6861.T', 'KEYENCE Corporation'),
+                'daiichi sankyo': ('4568.T', 'Daiichi Sankyo Company, Limited'),
+                'tokyo electron': ('8035.T', 'Tokyo Electron Limited'),
+                'nissan': ('7201.T', 'Nissan Motor Co., Ltd.'),
+                'canon': ('7751.T', 'Canon Inc.'),
+                'olympus': ('7733.T', 'Olympus Corporation'),
+                'mazda': ('7261.T', 'Mazda Motor Corporation'),
+                'yamaha': ('7951.T', 'Yamaha Corporation'),
+                'casio': ('6952.T', 'Casio Computer Co., Ltd.'),
+                'citizen': ('7762.T', 'Citizen Watch Co., Ltd.'),
+                
+                # China (Hong Kong Listed)
+                'alibaba': ('9988.HK', 'Alibaba Group Holding Limited'),
+                'tencent': ('0700.HK', 'Tencent Holdings Limited'),
+                'xiaomi': ('1810.HK', 'Xiaomi Corporation'),
+                'meituan': ('3690.HK', 'Meituan'),
+                'byd': ('1211.HK', 'BYD Company Limited'),
+                'china mobile': ('0941.HK', 'China Mobile Limited'),
+                'ping an': ('2318.HK', 'Ping An Insurance (Group) Company of China, Ltd.'),
+                'icbc': ('1398.HK', 'Industrial and Commercial Bank of China Limited'),
+                'china construction bank': ('0939.HK', 'China Construction Bank Corporation'),
+                'netease': ('9999.HK', 'NetEase, Inc.'),
+                'jd.com': ('9618.HK', 'JD.com, Inc.'),
+                'baidu': ('9888.HK', 'Baidu, Inc.'),
+                'china life': ('2628.HK', 'China Life Insurance Company Limited'),
+                'sinopec': ('0386.HK', 'China Petroleum & Chemical Corporation'),
+                'china unicom': ('0762.HK', 'China Unicom (Hong Kong) Limited'),
+                'geely': ('0175.HK', 'Geely Automobile Holdings Limited'),
+                'lenovo': ('0992.HK', 'Lenovo Group Limited'),
+                'nio': ('9866.HK', 'NIO Inc.'),
+                'li auto': ('2015.HK', 'Li Auto Inc.'),
+                'xpeng': ('9868.HK', 'XPeng Inc.'),
+                
+                # South Korea
+                'samsung electronics': ('005930.KS', 'Samsung Electronics Co., Ltd.'),
+                'sk hynix': ('000660.KS', 'SK Hynix Inc.'),
+                'lg chem': ('051910.KS', 'LG Chem, Ltd.'),
+                'hyundai motor': ('005380.KS', 'Hyundai Motor Company'),
+                'kia': ('000270.KS', 'Kia Corporation'),
+                'lg electronics': ('066570.KS', 'LG Electronics Inc.'),
+                'posco': ('005490.KS', 'POSCO Holdings Inc.'),
+                'kb financial': ('105560.KS', 'KB Financial Group Inc.'),
+                'shinhan financial': ('055550.KS', 'Shinhan Financial Group Co., Ltd.'),
+                'naver': ('035420.KS', 'NAVER Corporation'),
+                'kakao': ('035720.KS', 'Kakao Corp.'),
+                'samsung sdi': ('006400.KS', 'Samsung SDI Co., Ltd.'),
+                'sk telecom': ('017670.KS', 'SK Telecom Co., Ltd.'),
+                'kt': ('030200.KS', 'KT Corporation'),
+                'lotte chemical': ('011170.KS', 'Lotte Chemical Corporation'),
+                
+                # Taiwan
+                'tsmc': ('2330.TW', 'Taiwan Semiconductor Manufacturing Company Limited'),
+                'foxconn': ('2317.TW', 'Hon Hai Precision Industry Co., Ltd.'),
+                'mediatek': ('2454.TW', 'MediaTek Inc.'),
+                'asus': ('2357.TW', 'ASUSTeK Computer Inc.'),
+                'acer': ('2353.TW', 'Acer Incorporated'),
+                'delta electronics': ('2308.TW', 'Delta Electronics, Inc.'),
+                'cathay financial': ('2882.TW', 'Cathay Financial Holding Co., Ltd.'),
+                'fubon financial': ('2881.TW', 'Fubon Financial Holding Co., Ltd.'),
+                
+                # Singapore
+                'dbs': ('D05.SI', 'DBS Group Holdings Ltd'),
+                'uob': ('U11.SI', 'United Overseas Bank Limited'),
+                'ocbc': ('O39.SI', 'Oversea-Chinese Banking Corporation Limited'),
+                'singtel': ('Z74.SI', 'Singapore Telecommunications Limited'),
+                'sea limited': ('SE', 'Sea Limited'),  # Listed on NYSE but Singapore-based
+                'grab': ('GRAB', 'Grab Holdings Limited'),  # Listed on NASDAQ but Singapore-based
+                
+                # India (some major companies with global listings)
+                'infosys': ('INFY', 'Infosys Limited'),  # Listed on NYSE
+                'wipro': ('WIT', 'Wipro Limited'),  # Listed on NYSE
+                'tata motors': ('TTM', 'Tata Motors Limited'),  # Listed on NYSE
+                'icici bank': ('IBN', 'ICICI Bank Limited'),  # Listed on NYSE
+                'dr reddy': ('RDY', 'Dr. Reddys Laboratories Limited'),  # Listed on NYSE
+            }
+            
+            normalized_query = normalize_name(company_name)
+            
+            # Check for direct matches in our mapping
+            for key, (ticker, full_name) in common_mappings.items():
+                if (normalized_query in key or key in normalized_query) and len(normalized_query) > 2:
+                    # Check if already found via API
+                    if not any(match['symbol'] == ticker for match in matches):
+                        score = 95 if normalized_query == key else 85
+                        matches.append({
+                            'symbol': ticker,
+                            'name': full_name,
+                            'exchange': 'Known Company',
+                            'type': 'EQUITY',
+                            'score': score
+                        })
+            
+            # Sort by score (highest first) and limit results
+            matches.sort(key=lambda x: x['score'], reverse=True)
+            return matches[:max_results]
+            
+        except Exception as e:
+            return []
         
     def fetch_stock_data(self, symbol, period='2y'):
         try:
@@ -413,7 +717,12 @@ class ValueInvestmentAnalyzer:
         ratios['Gross Margin'] = info.get('grossMargins', 'N/A')
         
         # Financial Strength Ratios
-        ratios['Debt to Equity'] = info.get('debtToEquity', 'N/A')
+        debt_to_equity = info.get('debtToEquity', 'N/A')
+        if debt_to_equity != 'N/A' and isinstance(debt_to_equity, (int, float)):
+            # Convert from percentage to ratio (e.g., 154 -> 1.54)
+            ratios['Debt to Equity'] = debt_to_equity / 100
+        else:
+            ratios['Debt to Equity'] = debt_to_equity
         ratios['Current Ratio'] = info.get('currentRatio', 'N/A')
         ratios['Quick Ratio'] = info.get('quickRatio', 'N/A')
         
@@ -1007,12 +1316,12 @@ class ValueInvestmentAnalyzer:
         
         if ratios.get('Debt to Equity') != 'N/A' and ratios['Debt to Equity'] is not None:
             total_criteria += 1
-            if ratios['Debt to Equity'] < 0.5:
+            if ratios['Debt to Equity'] < 1.0:
                 score += 1
                 criteria_met += 1
-                criteria_checks.append(("Debt/Equity < 0.5", "✅", ratios['Debt to Equity']))
+                criteria_checks.append(("Debt/Equity < 1.0", "✅", ratios['Debt to Equity']))
             else:
-                criteria_checks.append(("Debt/Equity < 0.5", "❌", ratios['Debt to Equity']))
+                criteria_checks.append(("Debt/Equity < 1.0", "❌", ratios['Debt to Equity']))
         
         if ratios.get('Current Ratio') != 'N/A' and ratios['Current Ratio'] is not None:
             total_criteria += 1
@@ -1101,12 +1410,16 @@ class ValueInvestmentAnalyzer:
             # Leverage, Liquidity, and Source of Funds (3 points max)
             
             # 5. Decreasing long-term debt
-            debt_ratio = self.stock_info.get('debtToEquity', 0)
-            if isinstance(debt_ratio, (int, float)) and debt_ratio < 0.4:
-                score += 1
-                criteria.append(("Low Debt/Equity (<0.4)", "✅", f"{debt_ratio:.2f}"))
+            debt_ratio_raw = self.stock_info.get('debtToEquity', 0)
+            if isinstance(debt_ratio_raw, (int, float)):
+                debt_ratio = debt_ratio_raw / 100  # Convert from percentage to ratio
+                if debt_ratio < 0.4:
+                    score += 1
+                    criteria.append(("Low Debt/Equity (<0.4)", "✅", f"{debt_ratio:.2f}"))
+                else:
+                    criteria.append(("Low Debt/Equity (<0.4)", "❌", f"{debt_ratio:.2f}"))
             else:
-                criteria.append(("Low Debt/Equity (<0.4)", "❌", f"{debt_ratio:.2f}" if isinstance(debt_ratio, (int, float)) else "N/A"))
+                criteria.append(("Low Debt/Equity (<0.4)", "❌", "N/A"))
             
             # 6. Increasing current ratio
             current_ratio = self.stock_info.get('currentRatio', 0)
@@ -2681,7 +2994,7 @@ class ValueInvestmentAnalyzer:
                 'pb_ratio': pb_ratio,
                 'roe': roe,
                 'dividend_yield': self.stock_info.get('dividendYield', 0),
-                'debt_equity': self.stock_info.get('debtToEquity', None)
+                'debt_equity': self.stock_info.get('debtToEquity', None) / 100 if isinstance(self.stock_info.get('debtToEquity', None), (int, float)) else self.stock_info.get('debtToEquity', None)
             }
             
         except Exception:
@@ -2981,14 +3294,16 @@ class ValueInvestmentAnalyzer:
             # Debt/Equity (5 points)
             debt_equity = self.stock_info.get('debtToEquity', None)
             if debt_equity is not None:
+                # Convert to ratio for display (e.g., 154 -> 1.54)
+                debt_equity_ratio = debt_equity / 100
                 if debt_equity < max_debt_equity_percent * 0.5:
                     score += 5
-                    criteria['debt_equity'] = f'✅ Low {debt_equity:.1f}%'
+                    criteria['debt_equity'] = f'✅ Low {debt_equity_ratio:.2f}'
                 elif debt_equity < max_debt_equity_percent:
                     score += 3
-                    criteria['debt_equity'] = f'⚠️ Moderate {debt_equity:.1f}%'
+                    criteria['debt_equity'] = f'⚠️ Moderate {debt_equity_ratio:.2f}'
                 else:
-                    criteria['debt_equity'] = f'❌ High {debt_equity:.1f}%'
+                    criteria['debt_equity'] = f'❌ High {debt_equity_ratio:.2f}'
             
             # GROWTH METRICS (35 points)
             
@@ -4738,7 +5053,7 @@ def main():
     st.set_page_config(page_title="Value Investment Dashboard", layout="wide")
     
     st.title("📈 Stock Value Investment Dashboard")
-    st.markdown("Comprehensive analysis platform for American and European stocks and ETFs")
+    st.markdown("Comprehensive analysis platform for global stocks and ETFs across US, European, and Asian markets")
     
     # Add timestamp for tracking updates
     def get_build_timestamp():
@@ -4795,21 +5110,21 @@ def main():
         st.session_state.selected_stock_symbol = ''
     
     # Main navigation with session state support
-    main_tab_options = ["📊 Individual Stock Analysis", "🎯 Stock Screening", "📈 ETF Dashboard"]
+    main_tab_options = ["🔍 Company Search", "📊 Individual Stock Analysis", "🎯 Stock Screening", "📈 ETF Dashboard"]
     main_tab_index = st.radio(
         "Select Analysis Type:",
         range(len(main_tab_options)),
         format_func=lambda x: main_tab_options[x],
         index=st.session_state.main_tab_index,
         horizontal=True,
-        help="Choose between analyzing individual stocks, screening for opportunities, or exploring ETFs"
+        help="Choose between analyzing individual stocks, screening for opportunities, searching companies globally, or exploring ETFs"
     )
     
     # Update session state if user manually changes tab
     if main_tab_index != st.session_state.main_tab_index:
         st.session_state.main_tab_index = main_tab_index
         # Clear selected stock symbol when manually switching tabs (not from screening buttons)
-        if main_tab_index != 0:  # If not switching to individual analysis
+        if main_tab_index != 1:  # If not switching to individual analysis
             st.session_state.selected_stock_symbol = ''
     
     main_tab = main_tab_options[main_tab_index]
@@ -4829,6 +5144,12 @@ def main():
     - PEG ratio analysis
     - Asset-based valuation
     - Earnings Power Value
+    
+    **🔍 Company Search:**
+    - Advanced name-based search
+    - Multiple matching companies
+    - Global ticker discovery
+    - Direct analysis integration
     """)
     
     st.sidebar.markdown("### 📈 Screening Criteria")
@@ -4837,7 +5158,7 @@ def main():
     - P/E Ratio < 20 (reasonable earnings multiple)
     - P/B Ratio < 2.0 (trading below book value)
     - ROE > 10% (efficient equity use)
-    - Debt/Equity < 100% (manageable debt)
+    - Debt/Equity < 1.0 (manageable debt)
     - Current Ratio > 1.0 (liquidity strength)
     - FCF Yield > 2% (cash generation)
     
@@ -4860,6 +5181,11 @@ def main():
     - CAC 40 (France), AEX (Netherlands)
     - IBEX 35 (Spain), SMI (Switzerland)
     - Nordic markets (Sweden, Denmark, Norway)
+    
+    **Asia:**
+    - Nikkei 225 (Japan), Hang Seng (Hong Kong)
+    - KOSPI (South Korea), TAIEX (Taiwan)
+    - STI (Singapore), major Indian ADRs
     """)
     
     st.sidebar.markdown("### 📊 ETF Analysis")
@@ -4886,7 +5212,9 @@ def main():
     financial advisor before making investment decisions.
     """)
     
-    if main_tab == "📊 Individual Stock Analysis":
+    if main_tab == "🔍 Company Search":
+        company_search()
+    elif main_tab == "📊 Individual Stock Analysis":
         individual_stock_analysis()
     elif main_tab == "🎯 Stock Screening":
         stock_screening()
@@ -4897,7 +5225,7 @@ def individual_stock_analysis():
     """Individual stock analysis section"""
     st.markdown("---")
     st.markdown("### 🔍 Individual Stock Analysis")
-    st.markdown("Deep dive analysis of individual stocks with valuation models and financial metrics")
+    st.markdown("Deep dive analysis of individual stocks with valuation models and financial metrics across global markets")
     
     analyzer = ValueInvestmentAnalyzer()
     
@@ -4912,7 +5240,7 @@ def individual_stock_analysis():
             st.info(f"🎯 Analyzing {preselected_symbol} from screening results")
         with col_back:
             if st.button("← Back to Screening", help="Return to screening results"):
-                st.session_state.main_tab_index = 1  # Switch to Stock Screening tab
+                st.session_state.main_tab_index = 2  # Switch to Stock Screening tab
                 st.rerun()
         
         symbol = preselected_symbol
@@ -4921,12 +5249,12 @@ def individual_stock_analysis():
         with col1:
             input_type = st.radio("Search by:", ["Symbol", "Company Name"], horizontal=True)
             if input_type == "Symbol":
-                symbol = st.text_input("Enter Stock Symbol:", placeholder="e.g., AAPL, MSFT, ASML.AS, SAP.DE")
+                symbol = st.text_input("Enter Stock Symbol:", placeholder="e.g., AAPL, MSFT, ASML.AS, SAP.DE, 7203.T, 0700.HK")
                 # Clear selected symbol if user starts typing manually
                 if symbol and symbol != st.session_state.get('selected_stock_symbol', ''):
                     st.session_state.selected_stock_symbol = ''
             else:
-                company_name = st.text_input("Enter Company Name:", placeholder="e.g., Apple, Microsoft, ASML")
+                company_name = st.text_input("Enter Company Name:", placeholder="e.g., Apple, Microsoft, ASML, Toyota, Samsung")
                 if company_name:
                     symbol = analyzer.search_ticker_by_name(company_name)
                     if symbol:
@@ -4940,7 +5268,7 @@ def individual_stock_analysis():
                     symbol = None
     
     with col2:
-        market = st.selectbox("Market:", ["US (NASDAQ/NYSE)", "European"])
+        market = st.selectbox("Market:", ["US (NASDAQ/NYSE)", "European", "Asian (Japan/Hong Kong/Korea/Taiwan/Singapore)"])
     
     if symbol:
         with st.spinner(f"Fetching data for {symbol}..."):
@@ -5003,7 +5331,7 @@ def individual_stock_analysis():
                         st.metric("Dividend Yield", dividend_formatted)
                     
                     # Individual Stock Analysis Tabs
-                    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Price Chart", "💰 Value Analysis", "📈 Financial Ratios", "🎯 Investment Score", "🔬 Advanced Metrics", "📊 Risk Analysis", "📰 Financial News"])
+                    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Price Chart", "📰 Financial News", "💰 Value Analysis", "📈 Financial Ratios", "🎯 Investment Score", "🔬 Advanced Metrics", "📊 Risk Analysis"])
                     
                     with tab1:
                         st.subheader("📊 Price Chart & Volume Analysis")
@@ -5343,7 +5671,7 @@ def individual_stock_analysis():
                         else:
                             st.warning("No price data available for the selected period.")
                     
-                    with tab2:
+                    with tab3:
                         st.subheader("💰 Multiple Valuation Models")
                         st.markdown("Compare different valuation approaches for comprehensive analysis")
                         
@@ -5689,7 +6017,7 @@ def individual_stock_analysis():
                         else:
                             st.warning("Unable to calculate valuations due to insufficient price data.")
                     
-                    with tab3:
+                    with tab4:
                         st.subheader("📈 Key Financial Ratios")
                         
                         ratios = analyzer.calculate_financial_ratios()
@@ -5760,7 +6088,7 @@ def individual_stock_analysis():
                             else:
                                 st.write(f"**Operating Cash Flow:** {ocf}")
                     
-                    with tab4:
+                    with tab5:
                         st.subheader("Value Investment Score")
                         
                         score, total_criteria, criteria_met, criteria_checks = analyzer.get_value_score()
@@ -5806,7 +6134,7 @@ def individual_stock_analysis():
                         else:
                             st.warning("Insufficient data to calculate value score.")
                     
-                    with tab5:
+                    with tab6:
                         st.subheader("🔬 Advanced Financial Health Metrics")
                         st.markdown("Professional-grade analysis similar to GuruFocus.com")
                         
@@ -5946,7 +6274,7 @@ def individual_stock_analysis():
                                 else:
                                     st.error(f"🔴 Beneish M: {m_score:.2f} (Risk)")
                     
-                    with tab6:
+                    with tab7:
                         st.subheader("📊 Risk Analysis & Performance Metrics")
                         st.markdown("Analyze risk-adjusted returns and market correlation")
                         
@@ -6053,9 +6381,48 @@ def individual_stock_analysis():
                         else:
                             st.warning("Unable to calculate risk metrics. Insufficient data or benchmark issues.")
                     
-                    with tab7:
+                    with tab2:
                         st.subheader("📰 Recent Financial News")
                         st.markdown(f"Latest news and updates for {symbol}")
+                        
+                        # Move links to top - Add stock-specific research links
+                        st.markdown("### 🔗 Research & Analysis Sources")
+                        
+                        # Get stock-specific links for key research platforms
+                        base_symbol = symbol.split('.')[0]  # Remove exchange suffix
+                        
+                        # Top-tier research platforms
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.markdown("#### 📊 **Premium Research**")
+                            st.markdown(f"• [🎯 **Zacks Research**](https://www.zacks.com/stock/quote/{base_symbol})")
+                            st.markdown(f"• [⭐ **Morning Star**](https://www.morningstar.com/stocks/{base_symbol.lower()})")
+                            st.markdown(f"• [🤝 **Merger Markets**](https://www.mergermarket.com/public/search?q={base_symbol})")
+                        
+                        with col2:
+                            st.markdown("#### 📈 **Market Data**")
+                            st.markdown(f"• [📰 **Yahoo Finance**](https://finance.yahoo.com/quote/{symbol}/news)")
+                            st.markdown(f"• [📊 **MarketWatch**](https://www.marketwatch.com/investing/stock/{base_symbol})")
+                            st.markdown(f"• [📺 **Bloomberg**](https://www.bloomberg.com/quote/{symbol})")
+                        
+                        with col3:
+                            st.markdown("#### 🌐 **Global Sources**")
+                            st.markdown(f"• [🌍 **Reuters**](https://www.reuters.com/companies/{base_symbol})")
+                            st.markdown(f"• [💼 **Seeking Alpha**](https://seekingalpha.com/symbol/{base_symbol})")
+                            
+                            # Add region-specific sources
+                            if '.DE' in symbol:
+                                st.markdown(f"• [🇩🇪 **Börse Online**](https://www.boerse-online.de/aktien/{base_symbol.lower()}-aktie)")
+                            elif '.PA' in symbol:
+                                st.markdown(f"• [🇫🇷 **Les Échos**](https://www.lesechos.fr/finance-marches/marches-financiers)")
+                            elif '.L' in symbol:
+                                st.markdown(f"• [🇬🇧 **Financial Times**](https://markets.ft.com/data/equities/tearsheet/summary?s={base_symbol}:LSE)")
+                            else:
+                                st.markdown(f"• [📈 **Finviz**](https://finviz.com/quote.ashx?t={base_symbol})")
+                        
+                        st.markdown("---")
+                        st.markdown("### 📰 Recent News Articles")
                         
                         news_items = analyzer.get_financial_news(symbol)
                         
@@ -6107,31 +6474,179 @@ def individual_stock_analysis():
                                         # Add a small gap
                                         st.markdown("<br>", unsafe_allow_html=True)
                         
-                        # Always show alternative sources (especially helpful for European stocks)
-                        st.markdown("---")
-                        st.markdown("### 🔗 Alternative News Sources")
-                        
-                        alt_sources = analyzer.get_alternative_news_sources(symbol)
-                        
-                        # Display in columns for better layout
-                        cols = st.columns(2)
-                        for i, source in enumerate(alt_sources):
-                            with cols[i % 2]:
-                                st.markdown(f"• [{source['name']}]({source['url']})")
-                        
                         if not news_items:
-                            st.info("💡 No recent news found via API. European stocks often have limited news availability. Please check the alternative sources above for the latest updates.")
+                            st.info("💡 No recent news found via API. European stocks often have limited news availability. Please check the research sources above for the latest updates and analysis.")
                 
                 else:
                     st.error("Could not fetch stock information. Please check the symbol.")
     
+
+def company_search():
+    """Advanced company name search functionality"""
+    st.markdown("---")
+    st.markdown("### 🔍 Advanced Company Search")
+    st.markdown("Search for companies by name and get a list of matching stocks with their tickers")
+    
+    analyzer = ValueInvestmentAnalyzer()
+    
+    # Search input
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        search_query = st.text_input(
+            "Enter company name or partial name:",
+            placeholder="e.g., Apple, Microsoft, Tesla, Toyota, Samsung, pharmaceutical companies...",
+            help="Enter any part of a company name to find matching stocks"
+        )
+    
+    with col2:
+        max_results = st.slider("Max results:", min_value=5, max_value=20, value=10)
+    
+    if search_query and len(search_query) >= 2:
+        with st.spinner(f"Searching for companies matching '{search_query}'..."):
+            matches = analyzer.advanced_company_search(search_query, max_results)
+        
+        if matches:
+            st.success(f"Found {len(matches)} matching companies")
+            
+            # Create a nice table of results
+            st.markdown("### 🎯 Search Results")
+            
+            # Convert to DataFrame for better display
+            results_data = []
+            for i, match in enumerate(matches, 1):
+                results_data.append({
+                    '#': i,
+                    'Symbol': match['symbol'],
+                    'Company Name': match['name'],
+                    'Exchange': match['exchange'],
+                    'Type': match['type'],
+                    'Match Score': f"{match['score']}%"
+                })
+            
+            df = pd.DataFrame(results_data)
+            
+            # Display the table with clickable analyze buttons
+            for idx, match in enumerate(matches):
+                col1, col2, col3, col4, col5 = st.columns([1, 2, 4, 2, 2])
+                
+                with col1:
+                    st.write(f"**{idx + 1}**")
+                
+                with col2:
+                    st.code(match['symbol'])
+                
+                with col3:
+                    st.write(match['name'])
+                    if match['exchange'] != 'Known Company':
+                        st.caption(f"Exchange: {match['exchange']}")
+                
+                with col4:
+                    st.write(f"Score: {match['score']}%")
+                
+                with col5:
+                    if st.button(f"📊 Analyze", key=f"analyze_{match['symbol']}", help=f"Analyze {match['symbol']}"):
+                        # Set the selected symbol and switch to Individual Analysis tab
+                        st.session_state.selected_stock_symbol = match['symbol']
+                        st.session_state.main_tab_index = 1  # Switch to Individual Stock Analysis tab
+                        st.rerun()
+                
+                st.markdown("---")
+            
+            # Add export functionality
+            st.markdown("### 📥 Export Results")
+            col1, col2 = st.columns([1, 3])
+            
+            with col1:
+                # Create CSV for download
+                csv_data = pd.DataFrame([{
+                    'Symbol': match['symbol'],
+                    'Company_Name': match['name'],
+                    'Exchange': match['exchange'],
+                    'Type': match['type'],
+                    'Match_Score': match['score']
+                } for match in matches])
+                
+                csv = csv_data.to_csv(index=False)
+                st.download_button(
+                    label="📄 Download CSV",
+                    data=csv,
+                    file_name=f"company_search_{search_query.replace(' ', '_')}_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            
+            with col2:
+                st.info("💡 Click 'Analyze' to perform detailed analysis of any company, or download the results as CSV for your records.")
+        
+        else:
+            st.warning(f"No companies found matching '{search_query}'. Try:")
+            st.markdown("""
+            - Different spelling or shorter keywords
+            - Company's common name instead of full legal name
+            - Industry terms (e.g., "bank", "pharma", "tech")
+            - Ticker symbol directly in the Individual Analysis tab
+            """)
+    
+    elif search_query and len(search_query) < 2:
+        st.info("Please enter at least 2 characters to search")
+    
+    # Help section
+    if not search_query:
+        st.markdown("### 💡 How to Use")
+        st.markdown("""
+        **Examples of search queries:**
+        - `Apple` - Find Apple Inc. and related companies
+        - `Microsoft` - Find Microsoft Corporation  
+        - `Tesla` - Find Tesla Inc.
+        - `Toyota` - Find Toyota Motor Corporation
+        - `Samsung` - Find Samsung Electronics
+        - `Alibaba` - Find Alibaba Group
+        - `pharma` - Find pharmaceutical companies
+        - `bank` - Find banking institutions
+        - `semiconductor` - Find chip manufacturers
+        - `ASML` - Find ASML and similar companies
+        
+        **Features:**
+        - 🎯 **Smart matching** - Finds companies by partial names
+        - 🌍 **Global coverage** - US, European, and Asian markets
+        - 📊 **Direct analysis** - Click to analyze any result
+        - 📥 **Export results** - Download search results as CSV
+        - ⚡ **Real-time search** - Uses Yahoo Finance API for fresh data
+        """)
+        
+        st.markdown("### 🌍 Supported Markets")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("""
+            **🇺🇸 United States**
+            - NASDAQ, NYSE
+            - S&P 500, Dow Jones
+            - All major US companies
+            """)
+        
+        with col2:
+            st.markdown("""
+            **🇪🇺 Europe**
+            - London (LSE), Frankfurt (XETRA)
+            - Paris (Euronext), Amsterdam (AEX)  
+            - Switzerland, Nordic countries
+            """)
+        
+        with col3:
+            st.markdown("""
+            **🌏 Asia**
+            - Tokyo (TSE), Hong Kong (HKEX)
+            - Seoul (KRX), Taiwan (TWSE)
+            - Singapore (SGX), major Indian ADRs
+            """)
 
 
 def stock_screening():
     """Stock screening section with configurable parameters"""
     st.markdown("---")
     st.markdown("### 🎯 Stock Screening")
-    st.markdown("Discover undervalued stocks and growth opportunities across US and European markets with customizable criteria")
+    st.markdown("Discover undervalued stocks and growth opportunities across global markets (US, Europe, Asia) with customizable criteria")
     
     analyzer = ValueInvestmentAnalyzer()
     
@@ -6206,7 +6721,7 @@ def stock_screening():
             )
             
             max_debt_equity = st.slider(
-                "Max Debt/Equity (%)",
+                "Max Debt/Equity",
                 min_value=0.0,
                 max_value=200.0,
                 value=100.0,
@@ -6318,7 +6833,7 @@ def stock_screening():
             )
             
             max_debt_equity = st.slider(
-                "Max Debt/Equity (%)",
+                "Max Debt/Equity",
                 min_value=0.0,
                 max_value=150.0,
                 value=80.0,
@@ -6489,7 +7004,7 @@ def stock_screening():
                     - P/E Ratio < {max_pe_ratio}
                     - P/B Ratio < {max_pb_ratio}
                     - ROE > {min_roe}%
-                    - Debt/Equity < {max_debt_equity}%
+                    - Debt/Equity < {max_debt_equity}
                     - Current Ratio > {min_current_ratio}
                     - FCF Yield > {min_fcf_yield}%
                     """)
@@ -6556,7 +7071,7 @@ def stock_screening():
                     - Revenue Growth > {min_revenue_growth}%, Earnings > {min_earnings_growth}%
                     - ROE > {min_roe}%, Operating Margin > {min_operating_margin}%
                     - PEG < {max_peg_ratio}, P/S < {max_ps_ratio}
-                    - Debt/Equity < {max_debt_equity}%, Current Ratio > {min_current_ratio}
+                    - Debt/Equity < {max_debt_equity}, Current Ratio > {min_current_ratio}
                     """)
                 
                 # Display results (same pagination logic as before)
@@ -6619,7 +7134,7 @@ def stock_screening():
                             "P/E": format_value(stock.get('pe_ratio'), 1),
                             "P/B": format_value(stock.get('pb_ratio'), 2),
                             "ROE": format_value(stock.get('roe'), 1, "%", multiply_by_100=True),
-                            "D/E": format_value(stock.get('debt_equity'), 1, "%"),
+                            "D/E": format_value(stock.get('debt_equity'), 1),
                             "Div Yield": format_value(stock.get('dividend_yield'), 2, "%", multiply_by_100=True),
                             "Analyze": analyze_key
                         })
@@ -6664,7 +7179,7 @@ def stock_screening():
                         with col7:
                             st.write("**ROE**")
                         with col8:
-                            st.write("**D/E**")
+                            st.write("**D/E Ratio**")
                         with col9:
                             st.write("**Div Yield**")
                         with col10:
@@ -6697,7 +7212,7 @@ def stock_screening():
                                 roe_val = format_value(stock.get('roe'), 1, "%", multiply_by_100=True)
                                 st.write(roe_val)
                             with col8:
-                                de_val = format_value(stock.get('debt_equity'), 1, "%")
+                                de_val = format_value(stock.get('debt_equity'), 1)  # Remove % suffix for D/E ratio
                                 st.write(de_val)
                             with col9:
                                 div_val = format_value(stock.get('dividend_yield'), 2, "%", multiply_by_100=True)
@@ -6707,7 +7222,7 @@ def stock_screening():
                                            help=f"Analyze {stock['company']}", use_container_width=True):
                                     # Store selected stock in session state and switch to analysis tab
                                     st.session_state.selected_stock_symbol = stock['symbol']
-                                    st.session_state.main_tab_index = 0  # Switch to Individual Stock Analysis tab
+                                    st.session_state.main_tab_index = 1  # Switch to Individual Stock Analysis tab
                                     st.rerun()
                             
                             # Add separator line
@@ -6826,7 +7341,7 @@ def stock_screening():
                     "P/E": format_value(stock.get('pe_ratio'), 1),
                     "P/B": format_value(stock.get('pb_ratio'), 2),
                     "ROE": format_value(stock.get('roe'), 1, "%", multiply_by_100=True),
-                    "D/E": format_value(stock.get('debt_equity'), 1, "%"),
+                    "D/E": format_value(stock.get('debt_equity'), 1),
                     "Div Yield": format_value(stock.get('dividend_yield'), 2, "%", multiply_by_100=True),
                     "Analyze": analyze_key
                 })
@@ -6871,7 +7386,7 @@ def stock_screening():
                 with col7:
                     st.write("**ROE**")
                 with col8:
-                    st.write("**D/E**")
+                    st.write("**D/E Ratio**")
                 with col9:
                     st.write("**Div Yield**")
                 with col10:
@@ -6911,7 +7426,7 @@ def stock_screening():
                         roe_val = format_value(stock.get('roe'), 1, "%", multiply_by_100=True)
                         st.write(roe_val)
                     with col8:
-                        de_val = format_value(stock.get('debt_equity'), 1, "%")
+                        de_val = format_value(stock.get('debt_equity'), 1)  # Remove % suffix for D/E ratio
                         st.write(de_val)
                     with col9:
                         div_val = format_value(stock.get('dividend_yield'), 2, "%", multiply_by_100=True)
@@ -6921,7 +7436,7 @@ def stock_screening():
                                    help=f"Analyze {stock['company']}", use_container_width=True):
                             # Store selected stock in session state and switch to analysis tab
                             st.session_state.selected_stock_symbol = stock['symbol']
-                            st.session_state.main_tab_index = 0  # Switch to Individual Stock Analysis tab
+                            st.session_state.main_tab_index = 1  # Switch to Individual Stock Analysis tab
                             st.rerun()
                     
                     # Add separator line
