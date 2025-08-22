@@ -6576,17 +6576,17 @@ def stock_screening():
                     # Pagination controls
                     col1, col2, col3, col4 = st.columns([1, 1, 2, 1])
                     with col1:
-                        if st.button("⬅️ Previous", disabled=st.session_state.screening_page == 0):
+                        if st.button("⬅️ Previous", disabled=st.session_state.screening_page == 0, key="fresh_prev"):
                             st.session_state.screening_page -= 1
                             st.rerun()
                     with col2:
-                        if st.button("➡️ Next", disabled=st.session_state.screening_page >= total_pages - 1):
+                        if st.button("➡️ Next", disabled=st.session_state.screening_page >= total_pages - 1, key="fresh_next"):
                             st.session_state.screening_page += 1
                             st.rerun()
                     with col3:
                         st.write(f"Showing {start_idx + 1}-{end_idx} of {len(results)} stocks (Page {st.session_state.screening_page + 1}/{total_pages})")
                     with col4:
-                        if st.button("🔄 Reset"):
+                        if st.button("🔄 Reset", key="fresh_reset"):
                             st.session_state.screening_page = 0
                             st.rerun()
                     
@@ -6682,7 +6682,8 @@ def stock_screening():
                             label=f"📥 Download {screening_type} Results (CSV)",
                             data=csv,
                             file_name=f"{screening_type.lower().replace(' ', '_')}_screening_{datetime.now().strftime('%Y%m%d')}.csv",
-                            mime="text/csv"
+                            mime="text/csv",
+                            key="fresh_download"
                         )
                     
                     with col2:
@@ -6736,17 +6737,17 @@ def stock_screening():
             # Pagination controls
             col1, col2, col3, col4 = st.columns([1, 1, 2, 1])
             with col1:
-                if st.button("⬅️ Previous", disabled=st.session_state.screening_page == 0):
+                if st.button("⬅️ Previous", disabled=st.session_state.screening_page == 0, key="saved_prev"):
                     st.session_state.screening_page -= 1
                     st.rerun()
             with col2:
-                if st.button("➡️ Next", disabled=st.session_state.screening_page >= total_pages - 1):
+                if st.button("➡️ Next", disabled=st.session_state.screening_page >= total_pages - 1, key="saved_next"):
                     st.session_state.screening_page += 1
                     st.rerun()
             with col3:
                 st.write(f"Showing {start_idx + 1}-{end_idx} of {len(results)} stocks (Page {st.session_state.screening_page + 1}/{total_pages})")
             with col4:
-                if st.button("🔄 Reset", help="Reset to first page"):
+                if st.button("🔄 Reset", help="Reset to first page", key="saved_reset"):
                     st.session_state.screening_page = 0
                     st.rerun()
             
@@ -6842,7 +6843,8 @@ def stock_screening():
                     label=f"📥 Download {screening_type} Results (CSV)",
                     data=csv,
                     file_name=f"{screening_type.lower().replace(' ', '_')}_screening_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
+                    mime="text/csv",
+                    key="saved_download"
                 )
             
             with col2:
