@@ -4393,6 +4393,9 @@ def main():
     # Update session state if user manually changes tab
     if main_tab_index != st.session_state.main_tab_index:
         st.session_state.main_tab_index = main_tab_index
+        # Clear selected stock symbol when manually switching tabs (not from screening buttons)
+        if main_tab_index != 0:  # If not switching to individual analysis
+            st.session_state.selected_stock_symbol = ''
     
     main_tab = main_tab_options[main_tab_index]
     
@@ -4488,21 +4491,33 @@ def individual_stock_analysis():
     # Check if we have a pre-selected symbol from screening
     preselected_symbol = st.session_state.get('selected_stock_symbol', '')
     if preselected_symbol:
-        st.info(f"🎯 Analyzing {preselected_symbol} from screening results")
+        # Show info and back button
+        col_info, col_back = st.columns([3, 1])
+        with col_info:
+            st.info(f"🎯 Analyzing {preselected_symbol} from screening results")
+        with col_back:
+            if st.button("← Back to Screening", help="Return to screening results"):
+                st.session_state.main_tab_index = 1  # Switch to Stock Screening tab
+                st.rerun()
+        
         symbol = preselected_symbol
-        # Clear the preselected symbol after use
-        st.session_state.selected_stock_symbol = ''
+        # Don't clear the symbol yet - keep it for potential return to screening
     else:
         with col1:
             input_type = st.radio("Search by:", ["Symbol", "Company Name"], horizontal=True)
             if input_type == "Symbol":
                 symbol = st.text_input("Enter Stock Symbol:", placeholder="e.g., AAPL, MSFT, ASML.AS, SAP.DE")
+                # Clear selected symbol if user starts typing manually
+                if symbol and symbol != st.session_state.get('selected_stock_symbol', ''):
+                    st.session_state.selected_stock_symbol = ''
             else:
                 company_name = st.text_input("Enter Company Name:", placeholder="e.g., Apple, Microsoft, ASML")
                 if company_name:
                     symbol = analyzer.search_ticker_by_name(company_name)
                     if symbol:
                         st.success(f"Found ticker: {symbol}")
+                        # Clear selected symbol when using manual search
+                        st.session_state.selected_stock_symbol = ''
                     else:
                         st.error("Company not found. Try using the ticker symbol instead.")
                         symbol = None
