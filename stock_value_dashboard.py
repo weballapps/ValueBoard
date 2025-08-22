@@ -4368,13 +4368,28 @@ def main():
     st.title("📈 Stock Value Investment Dashboard")
     st.markdown("Comprehensive analysis platform for American and European stocks and ETFs")
     
-    # Main navigation
-    main_tab = st.radio(
+    # Initialize session state for tab switching
+    if 'main_tab_index' not in st.session_state:
+        st.session_state.main_tab_index = 0
+    if 'selected_stock_symbol' not in st.session_state:
+        st.session_state.selected_stock_symbol = ''
+    
+    # Main navigation with session state support
+    main_tab_options = ["📊 Individual Stock Analysis", "🎯 Stock Screening", "📈 ETF Dashboard"]
+    main_tab_index = st.radio(
         "Select Analysis Type:",
-        ["📊 Individual Stock Analysis", "🎯 Stock Screening", "📈 ETF Dashboard"],
+        range(len(main_tab_options)),
+        format_func=lambda x: main_tab_options[x],
+        index=st.session_state.main_tab_index,
         horizontal=True,
         help="Choose between analyzing individual stocks, screening for opportunities, or exploring ETFs"
     )
+    
+    # Update session state if user manually changes tab
+    if main_tab_index != st.session_state.main_tab_index:
+        st.session_state.main_tab_index = main_tab_index
+    
+    main_tab = main_tab_options[main_tab_index]
     
     # Sidebar documentation (appears on all pages)
     st.sidebar.markdown("## 📚 About Value Investing")
@@ -4465,21 +4480,29 @@ def individual_stock_analysis():
     
     col1, col2 = st.columns([2, 1])
     
-    with col1:
-        input_type = st.radio("Search by:", ["Symbol", "Company Name"], horizontal=True)
-        if input_type == "Symbol":
-            symbol = st.text_input("Enter Stock Symbol:", placeholder="e.g., AAPL, MSFT, ASML.AS, SAP.DE")
-        else:
-            company_name = st.text_input("Enter Company Name:", placeholder="e.g., Apple, Microsoft, ASML")
-            if company_name:
-                symbol = analyzer.search_ticker_by_name(company_name)
-                if symbol:
-                    st.success(f"Found ticker: {symbol}")
-                else:
-                    st.error("Company not found. Try using the ticker symbol instead.")
-                    symbol = None
+    # Check if we have a pre-selected symbol from screening
+    preselected_symbol = st.session_state.get('selected_stock_symbol', '')
+    if preselected_symbol:
+        st.info(f"🎯 Analyzing {preselected_symbol} from screening results")
+        symbol = preselected_symbol
+        # Clear the preselected symbol after use
+        st.session_state.selected_stock_symbol = ''
+    else:
+        with col1:
+            input_type = st.radio("Search by:", ["Symbol", "Company Name"], horizontal=True)
+            if input_type == "Symbol":
+                symbol = st.text_input("Enter Stock Symbol:", placeholder="e.g., AAPL, MSFT, ASML.AS, SAP.DE")
             else:
-                symbol = None
+                company_name = st.text_input("Enter Company Name:", placeholder="e.g., Apple, Microsoft, ASML")
+                if company_name:
+                    symbol = analyzer.search_ticker_by_name(company_name)
+                    if symbol:
+                        st.success(f"Found ticker: {symbol}")
+                    else:
+                        st.error("Company not found. Try using the ticker symbol instead.")
+                        symbol = None
+                else:
+                    symbol = None
     
     with col2:
         market = st.selectbox("Market:", ["US (NASDAQ/NYSE)", "European"])
@@ -5954,11 +5977,58 @@ def stock_screening():
                 help="Minimum gross profit margin percentage"
             )
     
+    # Initialize screening results in session state
+    if 'screening_results' not in st.session_state:
+        st.session_state.screening_results = None
+    if 'screening_type_used' not in st.session_state:
+        st.session_state.screening_type_used = None
+    if 'screening_filters_used' not in st.session_state:
+        st.session_state.screening_filters_used = None
+
     # Run screening button
     st.markdown("---")
     if st.button("🔍 Run Configurable Stock Screening", type="primary"):
         with st.spinner(f"Analyzing {screening_type.lower()} with your custom parameters..."):
             try:
+                # Store current filters
+                current_filters = {
+                    'screening_type': screening_type,
+                    'min_market_cap': min_market_cap,
+                    'max_market_cap': max_market_cap
+                }
+                if screening_type == "Value Stocks":
+                    current_filters.update({
+                        'max_pe_ratio': max_pe_ratio,
+                        'max_pb_ratio': max_pb_ratio,
+                        'min_roe': min_roe,
+                        'max_debt_equity': max_debt_equity,
+                        'min_current_ratio': min_current_ratio,
+                        'min_fcf_yield': min_fcf_yield
+                    })
+                elif screening_type == "Growth Stocks":
+                    current_filters.update({
+                        'min_revenue_growth': min_revenue_growth,
+                        'min_earnings_growth': min_earnings_growth,
+                        'min_roe': min_roe,
+                        'min_operating_margin': min_operating_margin,
+                        'max_peg_ratio': max_peg_ratio,
+                        'max_ps_ratio': max_ps_ratio
+                    })
+                else:  # ValueGrowth Stocks
+                    current_filters.update({
+                        'max_pe_ratio': max_pe_ratio,
+                        'max_pb_ratio': max_pb_ratio,
+                        'max_debt_equity': max_debt_equity,
+                        'min_revenue_growth': min_revenue_growth,
+                        'min_earnings_growth': min_earnings_growth,
+                        'max_peg_ratio': max_peg_ratio,
+                        'min_roe': min_roe,
+                        'min_operating_margin': min_operating_margin,
+                        'min_current_ratio': min_current_ratio,
+                        'max_ps_ratio': max_ps_ratio,
+                        'min_fcf_yield': min_fcf_yield,
+                        'min_gross_margin': min_gross_margin
+                    })
                 if screening_type == "Value Stocks":
                     results = analyzer.screen_value_stocks_configurable(
                         min_market_cap_millions=min_market_cap,
@@ -5970,6 +6040,11 @@ def stock_screening():
                         min_current_ratio=min_current_ratio,
                         min_fcf_yield_percent=min_fcf_yield
                     )
+                    
+                    # Store results in session state
+                    st.session_state.screening_results = results
+                    st.session_state.screening_type_used = screening_type
+                    st.session_state.screening_filters_used = current_filters
                     
                     # Display active criteria
                     st.success(f"✅ Found {len(results)} value stock candidates")
@@ -5995,6 +6070,11 @@ def stock_screening():
                         max_peg_ratio=max_peg_ratio,
                         max_ps_ratio=max_ps_ratio
                     )
+                    
+                    # Store results in session state
+                    st.session_state.screening_results = results
+                    st.session_state.screening_type_used = screening_type
+                    st.session_state.screening_filters_used = current_filters
                     
                     # Display active criteria
                     st.success(f"✅ Found {len(results)} growth stock candidates")
@@ -6026,6 +6106,11 @@ def stock_screening():
                         min_fcf_yield_percent=min_fcf_yield,
                         min_gross_margin_percent=min_gross_margin
                     )
+                    
+                    # Store results in session state
+                    st.session_state.screening_results = results
+                    st.session_state.screening_type_used = screening_type
+                    st.session_state.screening_filters_used = current_filters
                     
                     # Display active criteria
                     st.success(f"✅ Found {len(results)} value-growth stock candidates")
@@ -6070,60 +6155,83 @@ def stock_screening():
                             st.session_state.screening_page = 0
                             st.rerun()
                     
-                    # Display paginated results
+                    # Display results in compact table format
                     page_results = results[start_idx:end_idx]
                     
+                    # Prepare table data
+                    table_data = []
                     for i, stock in enumerate(page_results, start_idx + 1):
-                        with st.expander(f"#{i} {stock['company']} ({stock['symbol']})", expanded=False):
-                            col1, col2, col3, col4 = st.columns(4)
-                            
-                            with col1:
-                                score_key = 'score' if 'score' in stock else 'total_score'
-                                st.metric("Score", f"{stock[score_key]:.2f}")
-                                market_cap = stock.get('market_cap', 0)
-                                if market_cap > 1e9:
-                                    st.metric("Market Cap", f"${market_cap/1e9:.1f}B")
-                                else:
-                                    st.metric("Market Cap", f"${market_cap/1e6:.1f}M")
-                            
-                            with col2:
-                                pe_ratio = stock.get('pe_ratio')
-                                if pe_ratio and pe_ratio > 0:
-                                    st.metric("P/E Ratio", f"{pe_ratio:.1f}")
-                                else:
-                                    st.metric("P/E Ratio", "N/A")
-                                
-                                pb_ratio = stock.get('pb_ratio')
-                                if pb_ratio and pb_ratio > 0:
-                                    st.metric("P/B Ratio", f"{pb_ratio:.2f}")
-                                else:
-                                    st.metric("P/B Ratio", "N/A")
-                            
-                            with col3:
-                                roe = stock.get('roe')
-                                if roe and roe > 0:
-                                    st.metric("ROE", f"{roe:.1f}%")
-                                else:
-                                    st.metric("ROE", "N/A")
-                                
-                                debt_equity = stock.get('debt_equity')
-                                if debt_equity is not None:
-                                    st.metric("Debt/Equity", f"{debt_equity:.1f}%")
-                                else:
-                                    st.metric("Debt/Equity", "N/A")
-                            
-                            with col4:
-                                current_ratio = stock.get('current_ratio')
-                                if current_ratio:
-                                    st.metric("Current Ratio", f"{current_ratio:.2f}")
-                                else:
-                                    st.metric("Current Ratio", "N/A")
-                                
-                                dividend_yield = stock.get('dividend_yield')
-                                if dividend_yield and dividend_yield > 0:
-                                    st.metric("Dividend Yield", f"{dividend_yield:.2f}%")
-                                else:
-                                    st.metric("Dividend Yield", "N/A")
+                        score_key = 'score' if 'score' in stock else 'total_score'
+                        market_cap = stock.get('market_cap', 0)
+                        market_cap_display = f"${market_cap/1e9:.1f}B" if market_cap > 1e9 else f"${market_cap/1e6:.0f}M"
+                        
+                        # Format values with proper handling of None/null values
+                        def format_value(value, decimals=1, suffix="", default="N/A", multiply_by_100=False):
+                            if value is None or (value == 0 and suffix != "%"):
+                                return default
+                            display_value = value * 100 if multiply_by_100 else value
+                            return f"{display_value:.{decimals}f}{suffix}"
+                        
+                        # Create analysis link button identifier
+                        analyze_key = f"analyze_{stock['symbol']}_{i}"
+                        
+                        table_data.append({
+                            "Rank": i,
+                            "Company": stock['company'],
+                            "Symbol": stock['symbol'],
+                            "Score": f"{stock[score_key]:.1f}",
+                            "Market Cap": market_cap_display,
+                            "P/E": format_value(stock.get('pe_ratio'), 1),
+                            "P/B": format_value(stock.get('pb_ratio'), 2),
+                            "ROE": format_value(stock.get('roe'), 1, "%", multiply_by_100=True),
+                            "D/E": format_value(stock.get('debt_equity'), 1, "%"),
+                            "Div Yield": format_value(stock.get('dividend_yield'), 2, "%", multiply_by_100=True),
+                            "Analyze": analyze_key
+                        })
+                    
+                    # Display table using st.dataframe with clickable links
+                    if table_data:
+                        df = pd.DataFrame(table_data)
+                        
+                        # Configure column display
+                        column_config = {
+                            "Rank": st.column_config.NumberColumn("Rank", width="small"),
+                            "Company": st.column_config.TextColumn("Company", width="large"),
+                            "Symbol": st.column_config.TextColumn("Symbol", width="small"),
+                            "Score": st.column_config.NumberColumn("Score", width="small"),
+                            "Market Cap": st.column_config.TextColumn("Market Cap", width="medium"),
+                            "P/E": st.column_config.TextColumn("P/E", width="small"),
+                            "P/B": st.column_config.TextColumn("P/B", width="small"),
+                            "ROE": st.column_config.TextColumn("ROE", width="small"),
+                            "D/E": st.column_config.TextColumn("D/E", width="small"),
+                            "Div Yield": st.column_config.TextColumn("Div Yield", width="small"),
+                            "Analyze": st.column_config.TextColumn("Action", width="small")
+                        }
+                        
+                        # Display the dataframe table
+                        st.dataframe(
+                            df.drop('Analyze', axis=1),  # Hide the analyze key column
+                            column_config=column_config,
+                            hide_index=True,
+                            use_container_width=True,
+                            height=600  # Set height for scrolling
+                        )
+                        
+                        # Add analyze buttons in a compact format below the table
+                        st.markdown("### 🔍 Quick Analysis")
+                        st.markdown("Click on any stock symbol to jump to individual analysis:")
+                        
+                        # Create analyze buttons in a grid format
+                        cols = st.columns(5)  # 5 buttons per row
+                        for idx, stock in enumerate(page_results):
+                            col_idx = idx % 5
+                            with cols[col_idx]:
+                                if st.button(f"📊 {stock['symbol']}", key=f"quick_analyze_{stock['symbol']}_{idx}", 
+                                           help=f"Analyze {stock['company']}", use_container_width=True):
+                                    # Store selected stock in session state and switch to analysis tab
+                                    st.session_state.selected_stock_symbol = stock['symbol']
+                                    st.session_state.main_tab_index = 0  # Switch to Individual Stock Analysis tab
+                                    st.rerun()
                     
                     # Export functionality
                     st.markdown("---")
@@ -6151,6 +6259,159 @@ def stock_screening():
             except Exception as e:
                 st.error(f"❌ Error during screening: {str(e)}")
                 st.info("Please try adjusting your parameters or contact support if the issue persists.")
+    
+    # Display saved screening results if they exist
+    if st.session_state.screening_results is not None and len(st.session_state.screening_results) > 0:
+        st.markdown("---")
+        
+        # Show information about the current results
+        saved_type = st.session_state.screening_type_used or "Unknown"
+        saved_filters = st.session_state.screening_filters_used or {}
+        
+        st.info(f"📊 **Showing saved {saved_type} screening results** ({len(st.session_state.screening_results)} stocks found)")
+        
+        # Add button to clear results
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button("🗑️ Clear Results", help="Clear saved screening results"):
+                st.session_state.screening_results = None
+                st.session_state.screening_type_used = None
+                st.session_state.screening_filters_used = None
+                st.session_state.screening_page = 0
+                st.rerun()
+        
+        # Display results using same logic as in the try block
+        results = st.session_state.screening_results
+        screening_type = st.session_state.screening_type_used
+        
+        # Display results (same pagination logic as before)
+        if results and len(results) > 0:
+            # Display top results with pagination
+            st.subheader(f"🏅 Top {screening_type}")
+            
+            # Pagination controls
+            if 'screening_page' not in st.session_state:
+                st.session_state.screening_page = 0
+            
+            results_per_page = 25
+            total_pages = (len(results) - 1) // results_per_page + 1
+            start_idx = st.session_state.screening_page * results_per_page
+            end_idx = min(start_idx + results_per_page, len(results))
+            
+            # Pagination controls
+            col1, col2, col3, col4 = st.columns([1, 1, 2, 1])
+            with col1:
+                if st.button("⬅️ Previous", disabled=st.session_state.screening_page == 0):
+                    st.session_state.screening_page -= 1
+                    st.rerun()
+            with col2:
+                if st.button("➡️ Next", disabled=st.session_state.screening_page >= total_pages - 1):
+                    st.session_state.screening_page += 1
+                    st.rerun()
+            with col3:
+                st.write(f"Showing {start_idx + 1}-{end_idx} of {len(results)} stocks (Page {st.session_state.screening_page + 1}/{total_pages})")
+            with col4:
+                if st.button("🔄 Reset", help="Reset to first page"):
+                    st.session_state.screening_page = 0
+                    st.rerun()
+            
+            # Display results in compact table format
+            page_results = results[start_idx:end_idx]
+            
+            # Prepare table data
+            table_data = []
+            for i, stock in enumerate(page_results, start_idx + 1):
+                score_key = 'score' if 'score' in stock else 'total_score'
+                market_cap = stock.get('market_cap', 0)
+                market_cap_display = f"${market_cap/1e9:.1f}B" if market_cap > 1e9 else f"${market_cap/1e6:.0f}M"
+                
+                # Format values with proper handling of None/null values
+                def format_value(value, decimals=1, suffix="", default="N/A", multiply_by_100=False):
+                    if value is None or (value == 0 and suffix != "%"):
+                        return default
+                    display_value = value * 100 if multiply_by_100 else value
+                    return f"{display_value:.{decimals}f}{suffix}"
+                
+                # Create analysis link button identifier
+                analyze_key = f"analyze_{stock['symbol']}_{i}"
+                
+                table_data.append({
+                    "Rank": i,
+                    "Company": stock['company'],
+                    "Symbol": stock['symbol'],
+                    "Score": f"{stock[score_key]:.1f}",
+                    "Market Cap": market_cap_display,
+                    "P/E": format_value(stock.get('pe_ratio'), 1),
+                    "P/B": format_value(stock.get('pb_ratio'), 2),
+                    "ROE": format_value(stock.get('roe'), 1, "%", multiply_by_100=True),
+                    "D/E": format_value(stock.get('debt_equity'), 1, "%"),
+                    "Div Yield": format_value(stock.get('dividend_yield'), 2, "%", multiply_by_100=True),
+                    "Analyze": analyze_key
+                })
+            
+            # Display table using st.dataframe with clickable links
+            if table_data:
+                df = pd.DataFrame(table_data)
+                
+                # Configure column display
+                column_config = {
+                    "Rank": st.column_config.NumberColumn("Rank", width="small"),
+                    "Company": st.column_config.TextColumn("Company", width="large"),
+                    "Symbol": st.column_config.TextColumn("Symbol", width="small"),
+                    "Score": st.column_config.NumberColumn("Score", width="small"),
+                    "Market Cap": st.column_config.TextColumn("Market Cap", width="medium"),
+                    "P/E": st.column_config.TextColumn("P/E", width="small"),
+                    "P/B": st.column_config.TextColumn("P/B", width="small"),
+                    "ROE": st.column_config.TextColumn("ROE", width="small"),
+                    "D/E": st.column_config.TextColumn("D/E", width="small"),
+                    "Div Yield": st.column_config.TextColumn("Div Yield", width="small"),
+                    "Analyze": st.column_config.TextColumn("Action", width="small")
+                }
+                
+                # Display the dataframe table
+                st.dataframe(
+                    df.drop('Analyze', axis=1),  # Hide the analyze key column
+                    column_config=column_config,
+                    hide_index=True,
+                    use_container_width=True,
+                    height=600  # Set height for scrolling
+                )
+                
+                # Add analyze buttons in a compact format below the table
+                st.markdown("### 🔍 Quick Analysis")
+                st.markdown("Click on any stock symbol to jump to individual analysis:")
+                
+                # Create analyze buttons in a grid format
+                cols = st.columns(5)  # 5 buttons per row
+                for idx, stock in enumerate(page_results):
+                    col_idx = idx % 5
+                    with cols[col_idx]:
+                        if st.button(f"📊 {stock['symbol']}", key=f"saved_analyze_{stock['symbol']}_{idx}", 
+                                   help=f"Analyze {stock['company']}", use_container_width=True):
+                            # Store selected stock in session state and switch to analysis tab
+                            st.session_state.selected_stock_symbol = stock['symbol']
+                            st.session_state.main_tab_index = 0  # Switch to Individual Stock Analysis tab
+                            st.rerun()
+            
+            # Export functionality
+            st.markdown("---")
+            st.subheader("📊 Export Results")
+            
+            # Prepare export data
+            export_df = pd.DataFrame(results)
+            csv = export_df.to_csv(index=False)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button(
+                    label=f"📥 Download {screening_type} Results (CSV)",
+                    data=csv,
+                    file_name=f"{screening_type.lower().replace(' ', '_')}_screening_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            
+            with col2:
+                st.markdown(f"**Total Results:** {len(results)} stocks")
     
     # Parameter guide
     st.markdown("---")
