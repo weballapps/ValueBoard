@@ -2321,7 +2321,7 @@ class ValueInvestmentAnalyzer:
             
             return {
                 'symbol': symbol,
-                'company_name': company_name,
+                'company': company_name,
                 'current_price': current_price,
                 'market_cap': market_cap,
                 'market': market,
@@ -2758,7 +2758,7 @@ class ValueInvestmentAnalyzer:
             
             return {
                 'symbol': symbol,
-                'company_name': company_name,
+                'company': company_name,
                 'current_price': current_price,
                 'market_cap': market_cap,
                 'market': market,
