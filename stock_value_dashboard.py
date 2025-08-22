@@ -6643,30 +6643,76 @@ def stock_screening():
                             "Analyze": st.column_config.TextColumn("Action", width="small")
                         }
                         
-                        # Display the dataframe table
-                        st.dataframe(
-                            df.drop('Analyze', axis=1),  # Hide the analyze key column
-                            column_config=column_config,
-                            hide_index=True,
-                            use_container_width=True,
-                            height=600  # Set height for scrolling
-                        )
+                        # Create analyze buttons for each row
+                        st.markdown("### 📊 Top Stocks Results")
+                        st.markdown("Click **Analyze** to jump to detailed individual analysis:")
                         
-                        # Add analyze buttons in a compact format below the table
-                        st.markdown("### 🔍 Quick Analysis")
-                        st.markdown("Click on any stock symbol to jump to individual analysis:")
+                        # Add column headers
+                        col1, col2, col3, col4, col5, col6, col7, col8, col9, col10 = st.columns([0.5, 2, 1, 1, 1, 1, 1, 1, 1, 1])
+                        with col1:
+                            st.write("**#**")
+                        with col2:
+                            st.write("**Company**")
+                        with col3:
+                            st.write("**Score**")
+                        with col4:
+                            st.write("**Market Cap**")
+                        with col5:
+                            st.write("**P/E**")
+                        with col6:
+                            st.write("**P/B**")
+                        with col7:
+                            st.write("**ROE**")
+                        with col8:
+                            st.write("**D/E**")
+                        with col9:
+                            st.write("**Div Yield**")
+                        with col10:
+                            st.write("**Action**")
                         
-                        # Create analyze buttons in a grid format
-                        cols = st.columns(5)  # 5 buttons per row
-                        for idx, stock in enumerate(page_results):
-                            col_idx = idx % 5
-                            with cols[col_idx]:
-                                if st.button(f"📊 {stock['symbol']}", key=f"quick_analyze_{stock['symbol']}_{idx}", 
+                        st.markdown("---")
+                        
+                        # Display results with integrated analyze buttons
+                        for i, stock in enumerate(page_results, start_idx + 1):
+                            col1, col2, col3, col4, col5, col6, col7, col8, col9, col10 = st.columns([0.5, 2, 1, 1, 1, 1, 1, 1, 1, 1])
+                            
+                            with col1:
+                                st.write(f"**{i}**")
+                            with col2:
+                                st.write(f"**{stock['company'][:30]}{'...' if len(stock['company']) > 30 else ''}**")
+                                st.caption(stock['symbol'])
+                            with col3:
+                                st.metric("Score", f"{stock[score_key]:.1f}", delta=None)
+                            with col4:
+                                market_cap = stock.get('market_cap', 0)
+                                market_cap_display = f"${market_cap/1e9:.1f}B" if market_cap > 1e9 else f"${market_cap/1e6:.0f}M"
+                                st.write(market_cap_display)
+                            with col5:
+                                pe_val = format_value(stock.get('pe_ratio'), 1)
+                                st.write(pe_val)
+                            with col6:
+                                pb_val = format_value(stock.get('pb_ratio'), 2)
+                                st.write(pb_val)
+                            with col7:
+                                roe_val = format_value(stock.get('roe'), 1, "%", multiply_by_100=True)
+                                st.write(roe_val)
+                            with col8:
+                                de_val = format_value(stock.get('debt_equity'), 1, "%")
+                                st.write(de_val)
+                            with col9:
+                                div_val = format_value(stock.get('dividend_yield'), 2, "%", multiply_by_100=True)
+                                st.write(div_val)
+                            with col10:
+                                if st.button("📊 Analyze", key=f"fresh_analyze_{stock['symbol']}_{i}", 
                                            help=f"Analyze {stock['company']}", use_container_width=True):
                                     # Store selected stock in session state and switch to analysis tab
                                     st.session_state.selected_stock_symbol = stock['symbol']
                                     st.session_state.main_tab_index = 0  # Switch to Individual Stock Analysis tab
                                     st.rerun()
+                            
+                            # Add separator line
+                            if i < end_idx:
+                                st.markdown("---")
                     
                     # Export functionality
                     st.markdown("---")
@@ -6804,30 +6850,83 @@ def stock_screening():
                     "Analyze": st.column_config.TextColumn("Action", width="small")
                 }
                 
-                # Display the dataframe table
-                st.dataframe(
-                    df.drop('Analyze', axis=1),  # Hide the analyze key column
-                    column_config=column_config,
-                    hide_index=True,
-                    use_container_width=True,
-                    height=600  # Set height for scrolling
-                )
+                # Create analyze buttons for each row
+                st.markdown("### 📊 Saved Stocks Results")
+                st.markdown("Click **Analyze** to jump to detailed individual analysis:")
                 
-                # Add analyze buttons in a compact format below the table
-                st.markdown("### 🔍 Quick Analysis")
-                st.markdown("Click on any stock symbol to jump to individual analysis:")
+                # Add column headers
+                col1, col2, col3, col4, col5, col6, col7, col8, col9, col10 = st.columns([0.5, 2, 1, 1, 1, 1, 1, 1, 1, 1])
+                with col1:
+                    st.write("**#**")
+                with col2:
+                    st.write("**Company**")
+                with col3:
+                    st.write("**Score**")
+                with col4:
+                    st.write("**Market Cap**")
+                with col5:
+                    st.write("**P/E**")
+                with col6:
+                    st.write("**P/B**")
+                with col7:
+                    st.write("**ROE**")
+                with col8:
+                    st.write("**D/E**")
+                with col9:
+                    st.write("**Div Yield**")
+                with col10:
+                    st.write("**Action**")
                 
-                # Create analyze buttons in a grid format
-                cols = st.columns(5)  # 5 buttons per row
-                for idx, stock in enumerate(page_results):
-                    col_idx = idx % 5
-                    with cols[col_idx]:
-                        if st.button(f"📊 {stock['symbol']}", key=f"saved_analyze_{stock['symbol']}_{idx}", 
+                st.markdown("---")
+                
+                # Display results with integrated analyze buttons
+                for i, stock in enumerate(page_results, start_idx + 1):
+                    col1, col2, col3, col4, col5, col6, col7, col8, col9, col10 = st.columns([0.5, 2, 1, 1, 1, 1, 1, 1, 1, 1])
+                    
+                    with col1:
+                        st.write(f"**{i}**")
+                    with col2:
+                        st.write(f"**{stock['company'][:30]}{'...' if len(stock['company']) > 30 else ''}**")
+                        st.caption(stock['symbol'])
+                    with col3:
+                        score_key = 'score' if 'score' in stock else 'total_score'
+                        st.metric("Score", f"{stock[score_key]:.1f}", delta=None)
+                    with col4:
+                        market_cap = stock.get('market_cap', 0)
+                        market_cap_display = f"${market_cap/1e9:.1f}B" if market_cap > 1e9 else f"${market_cap/1e6:.0f}M"
+                        st.write(market_cap_display)
+                    with col5:
+                        def format_value(value, decimals=1, suffix="", default="N/A", multiply_by_100=False):
+                            if value is None or (value == 0 and suffix != "%"):
+                                return default
+                            display_value = value * 100 if multiply_by_100 else value
+                            return f"{display_value:.{decimals}f}{suffix}"
+                        
+                        pe_val = format_value(stock.get('pe_ratio'), 1)
+                        st.write(pe_val)
+                    with col6:
+                        pb_val = format_value(stock.get('pb_ratio'), 2)
+                        st.write(pb_val)
+                    with col7:
+                        roe_val = format_value(stock.get('roe'), 1, "%", multiply_by_100=True)
+                        st.write(roe_val)
+                    with col8:
+                        de_val = format_value(stock.get('debt_equity'), 1, "%")
+                        st.write(de_val)
+                    with col9:
+                        div_val = format_value(stock.get('dividend_yield'), 2, "%", multiply_by_100=True)
+                        st.write(div_val)
+                    with col10:
+                        if st.button("📊 Analyze", key=f"saved_analyze_{stock['symbol']}_{i}", 
                                    help=f"Analyze {stock['company']}", use_container_width=True):
                             # Store selected stock in session state and switch to analysis tab
                             st.session_state.selected_stock_symbol = stock['symbol']
                             st.session_state.main_tab_index = 0  # Switch to Individual Stock Analysis tab
                             st.rerun()
+                    
+                    # Add separator line
+                    if i < end_idx:
+                        st.markdown("---")
             
             # Export functionality
             st.markdown("---")
