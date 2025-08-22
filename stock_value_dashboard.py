@@ -4369,9 +4369,49 @@ def main():
     st.markdown("Comprehensive analysis platform for American and European stocks and ETFs")
     
     # Add timestamp for tracking updates
-    from datetime import datetime
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-    st.markdown(f"<small style='color: gray;'>Last updated: {current_time}</small>", unsafe_allow_html=True)
+    def get_build_timestamp():
+        """Get the actual build/commit timestamp"""
+        import os
+        import json
+        import subprocess
+        from datetime import datetime
+        
+        # First try to read from build_info.json (created during deployment)
+        try:
+            if os.path.exists('build_info.json'):
+                with open('build_info.json', 'r') as f:
+                    build_info = json.load(f)
+                    return build_info.get('last_update', ''), build_info.get('update_source', 'build file')
+        except:
+            pass
+        
+        # Fallback: Try to get git commit timestamp directly
+        try:
+            result = subprocess.run(['git', 'log', '-1', '--format=%ci'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                commit_time_str = result.stdout.strip().split(' +')[0]  # Remove timezone
+                commit_time = datetime.strptime(commit_time_str, "%Y-%m-%d %H:%M:%S")
+                return commit_time.strftime("%Y-%m-%d %H:%M"), "git commit"
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, ValueError):
+            pass
+        
+        # Fallback: Use main Python file modification time
+        try:
+            main_file_path = __file__
+            if os.path.exists(main_file_path):
+                mod_time = os.path.getmtime(main_file_path)
+                file_time = datetime.fromtimestamp(mod_time)
+                return file_time.strftime("%Y-%m-%d %H:%M"), "file modified"
+        except:
+            pass
+        
+        # Final fallback: Current time
+        current_time = datetime.now()
+        return current_time.strftime("%Y-%m-%d %H:%M"), "page load"
+    
+    build_time, time_source = get_build_timestamp()
+    st.markdown(f"<small style='color: gray;'>Last updated: {build_time} ({time_source})</small>", unsafe_allow_html=True)
     
     # Initialize session state for tab switching
     if 'main_tab_index' not in st.session_state:

@@ -62,3 +62,6 @@ test_*.py
 # Temporary files
 *.tmp
 *.temp
+
+# Build info (generated during deployment)
+build_info.json
