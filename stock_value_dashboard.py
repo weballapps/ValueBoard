@@ -8702,7 +8702,6 @@ def market_indexes_dashboard():
                                     hovertemplate='<b>%{y} vs %{x}</b><br>Correlation: %{z:.3f}<extra></extra>',
                                     colorbar=dict(
                                         title="Correlation",
-                                        titleside="right",
                                         tickmode="linear",
                                         tick0=-1,
                                         dtick=0.5
