@@ -1,0 +1,25 @@
+# Code Owners for Stock Value Investment Dashboard
+# This file defines who owns specific parts of the codebase
+
+# Global ownership - all files are owned by the repository maintainer(s)
+* @pballest
+
+# Core application files require extra review
+stock_value_dashboard.py @pballest
+generate_build_info.py @pballest
+
+# Configuration files
+render.yaml @pballest
+requirements.txt @pballest
+
+# GitHub workflows and configuration
+.github/ @pballest
+.github/workflows/ @pballest
+
+# Documentation
+*.md @pballest
+docs/ @pballest
+
+# Security-sensitive files
+.github/workflows/claude-code-review.yml @pballest
+.github/workflows/deploy-render.yml @pballest

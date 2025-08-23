@@ -5110,14 +5110,14 @@ def main():
         st.session_state.selected_stock_symbol = ''
     
     # Main navigation with session state support
-    main_tab_options = ["🔍 Company Search", "📊 Individual Stock Analysis", "🎯 Stock Screening", "📈 ETF Dashboard"]
+    main_tab_options = ["🔍 Company Search", "📊 Individual Stock Analysis", "🎯 Stock Screening", "📈 ETF Dashboard", "📉 Market Indexes & Rates"]
     main_tab_index = st.radio(
         "Select Analysis Type:",
         range(len(main_tab_options)),
         format_func=lambda x: main_tab_options[x],
         index=st.session_state.main_tab_index,
         horizontal=True,
-        help="Choose between analyzing individual stocks, screening for opportunities, searching companies globally, or exploring ETFs"
+        help="Choose between analyzing individual stocks, screening for opportunities, searching companies globally, exploring ETFs, or tracking market indexes and rates"
     )
     
     # Update session state if user manually changes tab
@@ -5204,6 +5204,20 @@ def main():
     - Sector allocation
     """)
     
+    st.sidebar.markdown("### 📉 Market Indexes & Rates")
+    st.sidebar.write("""
+    **Major Market Indexes:**
+    - Dow Jones, S&P 500, NASDAQ
+    - DAX, Euro Stoxx 50, FTSE 100
+    - Nikkei 225, Hang Seng, VIX
+    
+    **Currency & Commodities:**
+    - Major currencies vs EUR (USD, CHF, GBP)
+    - Cryptocurrencies (BTC, ETH)
+    - Commodities (Gold, Silver, Oil)
+    - Interactive historical charts
+    """)
+    
     st.sidebar.markdown("---")
     st.sidebar.markdown("### ℹ️ Disclaimer")
     st.sidebar.write("""
@@ -5218,8 +5232,10 @@ def main():
         individual_stock_analysis()
     elif main_tab == "🎯 Stock Screening":
         stock_screening()
-    else:  # ETF Dashboard
+    elif main_tab == "📈 ETF Dashboard":
         etf_dashboard()
+    else:  # Market Indexes & Rates
+        market_indexes_dashboard()
 
 def individual_stock_analysis():
     """Individual stock analysis section"""
@@ -8066,6 +8082,979 @@ def etf_dashboard():
     
     elif etf_symbols_input:
         st.error("❌ Invalid ETF symbols. Please check your input.")
+
+def market_indexes_dashboard():
+    """Market indexes and rates dashboard"""
+    st.markdown("---")
+    st.markdown("### 📉 Global Market Indexes & Exchange Rates")
+    st.markdown("Track major market indexes and currency/commodity rates with interactive charts")
+    
+    # Create two main sections
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.subheader("📊 Major Market Indexes")
+        
+        # Define major indexes with their symbols
+        major_indexes = {
+            "Dow Jones": "^DJI",
+            "S&P 500": "^GSPC", 
+            "NASDAQ": "^IXIC",
+            "DAX": "^GDAXI",
+            "Euro Stoxx 50": "^STOXX50E",
+            "FTSE 100": "^FTSE",
+            "Nikkei 225": "^N225",
+            "Hang Seng": "^HSI",
+            "VIX": "^VIX"
+        }
+        
+        # Index selection
+        selected_indexes = st.multiselect(
+            "Select Indexes to Display:",
+            options=list(major_indexes.keys()),
+            default=["Dow Jones", "DAX", "Euro Stoxx 50", "VIX"],
+            help="Choose which market indexes to analyze"
+        )
+        
+        # Time period selection for indexes
+        index_periods = {
+            "3 Months": "3mo",
+            "6 Months": "6mo",
+            "1 Year": "1y",
+            "2 Years": "2y",
+            "3 Years": "3y",
+            "5 Years": "5y",
+            "10 Years": "10y",
+            "Max Available": "max"
+        }
+        
+        selected_period_label = st.selectbox(
+            "Select Time Period:",
+            list(index_periods.keys()),
+            index=5,  # Default to 5 Years
+            key="index_period"
+        )
+        selected_period = index_periods[selected_period_label]
+        
+        if selected_indexes:
+            with st.spinner("Loading market index data..."):
+                index_data = {}
+                
+                for index_name in selected_indexes:
+                    symbol = major_indexes[index_name]
+                    try:
+                        ticker = yf.Ticker(symbol)
+                        hist_data = ticker.history(period=selected_period)
+                        
+                        if not hist_data.empty:
+                            # Calculate key metrics
+                            current_price = hist_data['Close'].iloc[-1]
+                            prev_close = hist_data['Close'].iloc[-2] if len(hist_data) > 1 else current_price
+                            change = current_price - prev_close
+                            change_pct = (change / prev_close) * 100
+                            
+                            # Performance metrics
+                            start_price = hist_data['Close'].iloc[0]
+                            period_return = ((current_price - start_price) / start_price) * 100
+                            
+                            # Volatility (annualized)
+                            daily_returns = hist_data['Close'].pct_change().dropna()
+                            volatility = daily_returns.std() * (252 ** 0.5) * 100  # Annualized
+                            
+                            index_data[index_name] = {
+                                'symbol': symbol,
+                                'current_price': current_price,
+                                'change': change,
+                                'change_pct': change_pct,
+                                'period_return': period_return,
+                                'volatility': volatility,
+                                'hist_data': hist_data
+                            }
+                    except Exception as e:
+                        st.warning(f"Could not load data for {index_name}: {str(e)}")
+                
+                if index_data:
+                    # Display current values in metrics
+                    st.markdown("#### 📈 Current Index Values")
+                    
+                    # Create metrics columns
+                    metrics_cols = st.columns(min(len(index_data), 4))
+                    
+                    for i, (index_name, data) in enumerate(index_data.items()):
+                        with metrics_cols[i % 4]:
+                            # Format the price based on index type
+                            if "VIX" in index_name:
+                                price_str = f"{data['current_price']:.2f}"
+                            else:
+                                price_str = f"{data['current_price']:,.0f}" if data['current_price'] > 100 else f"{data['current_price']:,.2f}"
+                            
+                            delta_str = f"{data['change_pct']:+.2f}%"
+                            st.metric(
+                                label=index_name,
+                                value=price_str,
+                                delta=delta_str
+                            )
+                    
+                    # Interactive chart
+                    st.markdown("#### 📉 Interactive Price Charts")
+                    
+                    fig_indexes = go.Figure()
+                    
+                    for index_name, data in index_data.items():
+                        hist_data = data['hist_data']
+                        
+                        # Normalize to percentage change for better comparison
+                        normalized_data = ((hist_data['Close'] / hist_data['Close'].iloc[0]) - 1) * 100
+                        
+                        fig_indexes.add_trace(go.Scatter(
+                            x=hist_data.index,
+                            y=normalized_data,
+                            mode='lines',
+                            name=index_name,
+                            hovertemplate=f'<b>{index_name}</b><br>' +
+                                        'Date: %{x}<br>' +
+                                        'Change: %{y:.2f}%<br>' +
+                                        '<extra></extra>'
+                        ))
+                    
+                    fig_indexes.update_layout(
+                        title=f"Market Indexes Performance Comparison ({selected_period_label})",
+                        xaxis_title="Date",
+                        yaxis_title="Performance (%)",
+                        hovermode='x unified',
+                        height=500,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    
+                    st.plotly_chart(fig_indexes, use_container_width=True)
+                    
+                    # Performance summary table
+                    st.markdown("#### 📋 Performance Summary")
+                    
+                    summary_data = []
+                    for index_name, data in index_data.items():
+                        summary_data.append({
+                            'Index': index_name,
+                            'Current Value': f"{data['current_price']:,.2f}",
+                            'Daily Change': f"{data['change_pct']:+.2f}%",
+                            f'{selected_period_label} Return': f"{data['period_return']:+.2f}%",
+                            'Volatility (Annual)': f"{data['volatility']:.1f}%"
+                        })
+                    
+                    summary_df = pd.DataFrame(summary_data)
+                    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                    
+                else:
+                    st.error("Could not load data for any selected indexes.")
+        else:
+            st.info("Please select at least one index to display.")
+    
+    with col2:
+        st.subheader("💱 Currency & Commodity Rates")
+        st.markdown("All rates displayed in EUR base currency")
+        
+        # Define currency and commodity pairs (all vs EUR)
+        forex_commodities = {
+            # Major Currencies vs EUR
+            "USD/EUR": "USDEUR=X",
+            "CHF/EUR": "CHFEUR=X", 
+            "GBP/EUR": "GBPEUR=X",
+            "JPY/EUR": "JPYEUR=X",
+            "CNY/EUR": "CNYEUR=X",
+            
+            # Cryptocurrencies vs EUR
+            "BTC/EUR": "BTC-EUR",
+            "ETH/EUR": "ETH-EUR",
+            
+            # Commodities (approximated via USD then converted conceptually)
+            "Gold (USD/oz)": "GC=F",
+            "Silver (USD/oz)": "SI=F", 
+            "Oil WTI (USD/bbl)": "CL=F",
+            "Oil Brent (USD/bbl)": "BZ=F"
+        }
+        
+        # Rate selection
+        selected_rates = st.multiselect(
+            "Select Rates to Display:",
+            options=list(forex_commodities.keys()),
+            default=["USD/EUR", "CHF/EUR", "GBP/EUR", "BTC/EUR"],
+            help="Choose which currency pairs and commodities to track"
+        )
+        
+        # Time period for rates
+        rates_periods = {
+            "1 Week": "1wk",
+            "1 Month": "1mo",
+            "3 Months": "3mo",
+            "6 Months": "6mo", 
+            "1 Year": "1y",
+            "2 Years": "2y",
+            "3 Years": "3y",
+            "5 Years": "5y",
+            "10 Years": "10y",
+            "Max Available": "max"
+        }
+        
+        selected_rates_period_label = st.selectbox(
+            "Select Time Period:",
+            list(rates_periods.keys()),
+            index=6,  # Default to 3 Years
+            key="rates_period"
+        )
+        selected_rates_period = rates_periods[selected_rates_period_label]
+        
+        if selected_rates:
+            with st.spinner("Loading currency and commodity data..."):
+                rates_data = {}
+                
+                for rate_name in selected_rates:
+                    symbol = forex_commodities[rate_name]
+                    try:
+                        ticker = yf.Ticker(symbol)
+                        hist_data = ticker.history(period=selected_rates_period)
+                        
+                        if not hist_data.empty:
+                            current_rate = hist_data['Close'].iloc[-1]
+                            prev_rate = hist_data['Close'].iloc[-2] if len(hist_data) > 1 else current_rate
+                            change = current_rate - prev_rate
+                            change_pct = (change / prev_rate) * 100
+                            
+                            # Period performance
+                            start_rate = hist_data['Close'].iloc[0]
+                            period_change_pct = ((current_rate - start_rate) / start_rate) * 100
+                            
+                            rates_data[rate_name] = {
+                                'symbol': symbol,
+                                'current_rate': current_rate,
+                                'change': change,
+                                'change_pct': change_pct,
+                                'period_change_pct': period_change_pct,
+                                'hist_data': hist_data
+                            }
+                    except Exception as e:
+                        st.warning(f"Could not load data for {rate_name}: {str(e)}")
+                
+                if rates_data:
+                    # Display current rates
+                    st.markdown("#### 💱 Current Exchange Rates")
+                    
+                    # Create metrics for rates
+                    rate_metrics_cols = st.columns(min(len(rates_data), 3))
+                    
+                    for i, (rate_name, data) in enumerate(rates_data.items()):
+                        with rate_metrics_cols[i % 3]:
+                            # Format based on rate type
+                            if "BTC" in rate_name or "ETH" in rate_name:
+                                rate_str = f"€{data['current_rate']:,.0f}"
+                            elif any(commodity in rate_name for commodity in ["Gold", "Silver", "Oil"]):
+                                rate_str = f"${data['current_rate']:.2f}"
+                            else:
+                                rate_str = f"{data['current_rate']:.4f}"
+                            
+                            delta_str = f"{data['change_pct']:+.2f}%"
+                            st.metric(
+                                label=rate_name,
+                                value=rate_str,
+                                delta=delta_str
+                            )
+                    
+                    # Interactive rates chart
+                    st.markdown("#### 📈 Interactive Rate Charts")
+                    
+                    fig_rates = go.Figure()
+                    
+                    for rate_name, data in rates_data.items():
+                        hist_data = data['hist_data']
+                        
+                        fig_rates.add_trace(go.Scatter(
+                            x=hist_data.index,
+                            y=hist_data['Close'],
+                            mode='lines',
+                            name=rate_name,
+                            hovertemplate=f'<b>{rate_name}</b><br>' +
+                                        'Date: %{x}<br>' +
+                                        'Rate: %{y:.4f}<br>' +
+                                        '<extra></extra>'
+                        ))
+                    
+                    fig_rates.update_layout(
+                        title=f"Currency & Commodity Rates ({selected_rates_period_label})",
+                        xaxis_title="Date", 
+                        yaxis_title="Rate",
+                        hovermode='x unified',
+                        height=500,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    
+                    st.plotly_chart(fig_rates, use_container_width=True)
+                    
+                    # Rates summary table
+                    st.markdown("#### 📋 Rates Summary")
+                    
+                    rates_summary = []
+                    for rate_name, data in rates_data.items():
+                        # Format current rate based on type
+                        if "BTC" in rate_name or "ETH" in rate_name:
+                            current_str = f"€{data['current_rate']:,.0f}"
+                        elif any(commodity in rate_name for commodity in ["Gold", "Silver", "Oil"]):
+                            current_str = f"${data['current_rate']:.2f}"
+                        else:
+                            current_str = f"{data['current_rate']:.4f}"
+                        
+                        rates_summary.append({
+                            'Pair/Asset': rate_name,
+                            'Current Rate': current_str,
+                            'Daily Change': f"{data['change_pct']:+.2f}%",
+                            f'{selected_rates_period_label} Change': f"{data['period_change_pct']:+.2f}%"
+                        })
+                    
+                    rates_df = pd.DataFrame(rates_summary)
+                    st.dataframe(rates_df, use_container_width=True, hide_index=True)
+                    
+                else:
+                    st.error("Could not load data for any selected rates.")
+        else:
+            st.info("Please select at least one currency pair or commodity to display.")
+    
+    # BTC Correlation Analysis
+    st.markdown("---")
+    st.markdown("### 🔗 Bitcoin Correlation Analysis")
+    st.markdown("Analyze Bitcoin's correlation with major market indexes")
+    
+    # Correlation analysis section
+    correlation_col1, correlation_col2 = st.columns([2, 1])
+    
+    with correlation_col1:
+        # Time period for correlation analysis
+        corr_periods = {
+            "3 Months": "3mo",
+            "6 Months": "6mo", 
+            "1 Year": "1y",
+            "2 Years": "2y",
+            "3 Years": "3y",
+            "5 Years": "5y",
+            "10 Years": "10y",
+            "Max Available": "max"
+        }
+        
+        selected_corr_period_label = st.selectbox(
+            "Select Correlation Analysis Period:",
+            list(corr_periods.keys()),
+            index=5,  # Default to 5 Years
+            key="correlation_period"
+        )
+        selected_corr_period = corr_periods[selected_corr_period_label]
+        
+        # Rolling correlation window
+        correlation_window = st.slider(
+            "Rolling Correlation Window (days):",
+            min_value=20,
+            max_value=180,
+            value=60,
+            step=10,
+            help="Number of days for rolling correlation calculation"
+        )
+        
+        if st.button("🔄 Calculate BTC Correlations", key="calc_btc_corr"):
+            with st.spinner("Calculating Bitcoin correlations with market indexes..."):
+                try:
+                    # Define the instruments for correlation analysis with alternative symbols
+                    correlation_instruments = {
+                        "Dow Jones": "^DJI", 
+                        "Euro Stoxx 50": "^STOXX50E",
+                        "VIX": "^VIX"
+                    }
+                    
+                    # Try multiple BTC symbols with comprehensive fallback
+                    btc_symbols = ["BTC-USD", "BTC-EUR", "BTCUSD=X", "BTCEUR=X", "^GDAXI"]  # Last one as fallback for testing
+                    btc_data = None
+                    btc_symbol_used = None
+                    
+                    st.write(f"🔍 Searching for Bitcoin data for period: {selected_corr_period_label}")
+                    
+                    for btc_symbol in btc_symbols:
+                        try:
+                            st.write(f"🔄 Trying symbol: {btc_symbol}")
+                            btc_ticker = yf.Ticker(btc_symbol)
+                            
+                            # Try different approaches based on period
+                            btc_hist = None
+                            if selected_corr_period == "max":
+                                # For max period, try a very long time first
+                                try:
+                                    btc_hist = btc_ticker.history(period="10y")
+                                    if btc_hist.empty:
+                                        btc_hist = btc_ticker.history(period="5y") 
+                                except:
+                                    btc_hist = btc_ticker.history(period="2y")
+                            else:
+                                btc_hist = btc_ticker.history(period=selected_corr_period)
+                            
+                            st.write(f"📊 Retrieved {len(btc_hist)} raw data points for {btc_symbol}")
+                            
+                            if not btc_hist.empty and len(btc_hist) > 20:
+                                btc_returns = btc_hist['Close'].pct_change().dropna()
+                                st.write(f"📈 Calculated {len(btc_returns)} return data points")
+                                
+                                if len(btc_returns) > 30:  # Minimum 30 trading days
+                                    # TIMEZONE FIX: Normalize to date-only (remove time component)
+                                    btc_data = btc_returns.tz_convert('UTC').tz_localize(None)
+                                    btc_data.index = btc_data.index.normalize()  # Remove time component
+                                    btc_symbol_used = btc_symbol
+                                    st.success(f"✅ Using {btc_symbol} with {len(btc_data)} return data points")
+                                    break
+                                else:
+                                    st.write(f"⚠️ {btc_symbol}: Only {len(btc_returns)} returns, need at least 30")
+                            else:
+                                st.write(f"❌ {btc_symbol}: Insufficient raw data ({len(btc_hist)} points)")
+                                
+                        except Exception as e:
+                            st.write(f"❌ Error with {btc_symbol}: {str(e)}")
+                    
+                    if btc_data is None:
+                        # Try with shorter periods as fallback
+                        fallback_periods = ["2y", "1y", "6mo", "3mo"]
+                        st.write("🔄 **Trying fallback periods for Bitcoin data...**")
+                        
+                        for fallback_period in fallback_periods:
+                            if fallback_period != selected_corr_period:  # Don't retry the same period
+                                st.write(f"🔄 Fallback attempt with {fallback_period}...")
+                                for btc_symbol in ["BTC-USD", "BTC-EUR"]:
+                                    try:
+                                        btc_ticker = yf.Ticker(btc_symbol)
+                                        btc_hist = btc_ticker.history(period=fallback_period)
+                                        
+                                        if not btc_hist.empty and len(btc_hist) > 20:
+                                            btc_returns = btc_hist['Close'].pct_change().dropna()
+                                            if len(btc_returns) > 30:
+                                                # TIMEZONE FIX: Normalize to date-only (remove time component)
+                                                btc_data = btc_returns.tz_convert('UTC').tz_localize(None)
+                                                btc_data.index = btc_data.index.normalize()  # Remove time component
+                                                btc_symbol_used = btc_symbol
+                                                st.warning(f"⚠️ Using fallback period {fallback_period} with {btc_symbol} ({len(btc_data)} data points)")
+                                                break
+                                    except:
+                                        continue
+                                if btc_data is not None:
+                                    break
+                        
+                        if btc_data is None:
+                            st.error(f"❌ Could not load sufficient Bitcoin data for any time period. This may be due to API limitations or network issues. Please try again later.")
+                            return
+                    
+                    # Add Bitcoin data to correlation data
+                    correlation_data = {"Bitcoin": btc_data}
+                    
+                    # Fetch historical data for market instruments
+                    progress_bar = st.progress(0, text="Loading market data...")
+                    
+                    for i, (instrument_name, symbol) in enumerate(correlation_instruments.items()):
+                        progress_bar.progress((i + 1) / (len(correlation_instruments) + 1), 
+                                            text=f"Loading {instrument_name}...")
+                        try:
+                            ticker = yf.Ticker(symbol)
+                            hist_data = ticker.history(period=selected_corr_period)
+                            
+                            if not hist_data.empty and len(hist_data) > 1:
+                                # Calculate daily returns
+                                daily_returns = hist_data['Close'].pct_change().dropna()
+                                
+                                if len(daily_returns) > 0:
+                                    # TIMEZONE FIX: Normalize to date-only (remove time component)
+                                    daily_returns_normalized = daily_returns.tz_convert('UTC').tz_localize(None)
+                                    daily_returns_normalized.index = daily_returns_normalized.index.normalize()
+                                    correlation_data[instrument_name] = daily_returns_normalized
+                                else:
+                                    st.warning(f"❌ {instrument_name}: No return data calculated")
+                            else:
+                                st.warning(f"❌ {instrument_name}: No historical data retrieved")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Error loading {instrument_name}: {str(e)}")
+                    
+                    progress_bar.progress(1.0, text="Data loading complete!")
+                    progress_bar.empty()  # Remove progress bar
+                    
+                    if len(correlation_data) >= 2 and "Bitcoin" in correlation_data:
+                        # Create DataFrame and align data
+                        try:
+                            aligned_data = pd.DataFrame(correlation_data)
+                        except Exception as e:
+                            st.error(f"❌ Error creating DataFrame: {e}")
+                            return
+                        
+                        # Clean and align data
+                        aligned_data = aligned_data.dropna(axis=1, how='all')  # Remove empty columns
+                        
+                        # Keep rows where Bitcoin has data AND at least one other instrument
+                        if 'Bitcoin' in aligned_data.columns:
+                            bitcoin_valid = aligned_data['Bitcoin'].notna()
+                            aligned_data = aligned_data[bitcoin_valid]
+                            
+                            other_columns = [col for col in aligned_data.columns if col != 'Bitcoin']
+                            if other_columns:
+                                has_other_data = aligned_data[other_columns].notna().any(axis=1)
+                                aligned_data = aligned_data[has_other_data]
+                        
+                        # Show final data summary
+                        if len(aligned_data) > 0:
+                            st.success(f"📊 **Analysis ready: {len(aligned_data)} trading days available** ({aligned_data.index.min().strftime('%Y-%m-%d')} to {aligned_data.index.max().strftime('%Y-%m-%d')})")
+                        else:
+                            st.error("❌ **No overlapping data found**")
+                            return
+                        
+                        # Adjust correlation window if necessary
+                        effective_window = min(correlation_window, len(aligned_data) // 2)
+                        if effective_window < 20 and len(aligned_data) >= 20:
+                            effective_window = min(20, len(aligned_data) - 1)
+                        
+                        if len(aligned_data) > effective_window and len(aligned_data) >= 30:
+                            # Calculate static correlations
+                            static_correlations = {}
+                            btc_returns = aligned_data["Bitcoin"]
+                            
+                            for instrument in ["Dow Jones", "Euro Stoxx 50", "VIX"]:
+                                if instrument in aligned_data.columns:
+                                    # Create a clean dataset for this pair
+                                    pair_data = pd.DataFrame({
+                                        'Bitcoin': btc_returns,
+                                        instrument: aligned_data[instrument]
+                                    }).dropna()
+                                    
+                                    if len(pair_data) >= 20:  # Minimum for meaningful correlation
+                                        correlation = pair_data['Bitcoin'].corr(pair_data[instrument])
+                                        static_correlations[instrument] = correlation
+                            
+                            # Calculate rolling correlations
+                            rolling_correlations = {}
+                            for instrument in ["Dow Jones", "Euro Stoxx 50", "VIX"]:
+                                if instrument in aligned_data.columns and instrument in static_correlations:
+                                    # Use the same clean pair data approach
+                                    pair_data = pd.DataFrame({
+                                        'Bitcoin': btc_returns,
+                                        instrument: aligned_data[instrument]
+                                    }).dropna()
+                                    
+                                    if len(pair_data) >= effective_window:
+                                        rolling_corr = pair_data['Bitcoin'].rolling(window=effective_window).corr(
+                                            pair_data[instrument]
+                                        ).dropna()
+                                        rolling_correlations[instrument] = rolling_corr
+                            
+                            # Update display with effective window used
+                            if effective_window != correlation_window:
+                                st.warning(f"⚠️ Using {effective_window}-day window instead of {correlation_window} days due to data availability")
+                            
+                            # Calculate traditional market correlation (Dow Jones vs Euro Stoxx 50)
+                            traditional_correlation = None
+                            traditional_rolling_correlation = None
+                            
+                            if "Dow Jones" in aligned_data.columns and "Euro Stoxx 50" in aligned_data.columns:
+                                dj_es_pair = pd.DataFrame({
+                                    'Dow Jones': aligned_data['Dow Jones'],
+                                    'Euro Stoxx 50': aligned_data['Euro Stoxx 50']
+                                }).dropna()
+                                
+                                if len(dj_es_pair) >= 20:
+                                    traditional_correlation = dj_es_pair['Dow Jones'].corr(dj_es_pair['Euro Stoxx 50'])
+                                    
+                                    # Calculate rolling correlation for traditional markets
+                                    if len(dj_es_pair) >= effective_window:
+                                        traditional_rolling_correlation = dj_es_pair['Dow Jones'].rolling(window=effective_window).corr(
+                                            dj_es_pair['Euro Stoxx 50']
+                                        ).dropna()
+                            
+                            # Check if we have any correlations to display
+                            if not static_correlations and traditional_correlation is None:
+                                st.error("❌ **No valid correlations calculated**")
+                                st.write("This can happen when:")
+                                st.write("- Bitcoin and market indices trade on completely different schedules")
+                                st.write("- There's insufficient overlapping data between instruments")
+                                st.write("- Data quality issues with the selected time period")
+                                st.write("\n💡 **Suggestions:**")
+                                st.write("- Try a shorter time period (1-2 years)")
+                                st.write("- Check if your internet connection is stable")
+                                st.write("- Try refreshing the page")
+                                return
+                            
+                            # Create and display correlation matrix
+                            st.markdown("#### 🎯 Correlation Matrix")
+                            
+                            # Prepare data for correlation matrix (only use overlapping data)
+                            matrix_data = aligned_data[['Bitcoin', 'Dow Jones', 'Euro Stoxx 50', 'VIX']].dropna()
+                            
+                            if len(matrix_data) > 0:
+                                # Calculate correlation matrix
+                                corr_matrix = matrix_data.corr()
+                                
+                                # Create heatmap
+                                fig_matrix = go.Figure(data=go.Heatmap(
+                                    z=corr_matrix.values,
+                                    x=corr_matrix.columns,
+                                    y=corr_matrix.columns,
+                                    colorscale='RdBu_r',  # Red-Blue reversed (red for negative, blue for positive)
+                                    zmid=0,  # Center at 0
+                                    zmin=-1,
+                                    zmax=1,
+                                    text=[[f'{val:.3f}' for val in row] for row in corr_matrix.values],
+                                    texttemplate='%{text}',
+                                    textfont={"size": 14, "color": "green"},
+                                    hovertemplate='<b>%{y} vs %{x}</b><br>Correlation: %{z:.3f}<extra></extra>',
+                                    colorbar=dict(
+                                        title="Correlation",
+                                        titleside="right",
+                                        tickmode="linear",
+                                        tick0=-1,
+                                        dtick=0.5
+                                    )
+                                ))
+                                
+                                fig_matrix.update_layout(
+                                    title="Correlation Matrix: Bitcoin, Dow Jones, Euro Stoxx 50, VIX",
+                                    xaxis_title="",
+                                    yaxis_title="",
+                                    height=500,
+                                    width=500
+                                )
+                                
+                                st.plotly_chart(fig_matrix, use_container_width=True)
+                                
+                                # Show matrix summary
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.markdown("**Strongest Positive Correlations:**")
+                                    # Get upper triangle of correlation matrix (excluding diagonal)
+                                    mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
+                                    upper_tri = corr_matrix.where(mask)
+                                    
+                                    # Find strongest positive correlations
+                                    max_corr_idx = np.unravel_index(np.nanargmax(upper_tri.values), upper_tri.shape)
+                                    max_corr_val = upper_tri.iloc[max_corr_idx]
+                                    max_pair = f"{upper_tri.index[max_corr_idx[0]]} ↔ {upper_tri.columns[max_corr_idx[1]]}"
+                                    st.write(f"• {max_pair}: {max_corr_val:.3f}")
+                                
+                                with col2:
+                                    st.markdown("**Strongest Negative Correlations:**")
+                                    # Find strongest negative correlation
+                                    min_corr_idx = np.unravel_index(np.nanargmin(upper_tri.values), upper_tri.shape)
+                                    min_corr_val = upper_tri.iloc[min_corr_idx]
+                                    min_pair = f"{upper_tri.index[min_corr_idx[0]]} ↔ {upper_tri.columns[min_corr_idx[1]]}"
+                                    st.write(f"• {min_pair}: {min_corr_val:.3f}")
+                            else:
+                                st.warning("❌ Insufficient data for correlation matrix")
+                            
+                            # Display static correlations
+                            st.markdown("#### 📊 Current Correlation Coefficients")
+                            
+                            # Create columns for all correlations (Bitcoin correlations + traditional market correlation)
+                            num_btc_correlations = len(static_correlations)
+                            has_traditional_correlation = traditional_correlation is not None
+                            total_correlations = num_btc_correlations + (1 if has_traditional_correlation else 0)
+                            
+                            if total_correlations > 0:
+                                corr_metrics_cols = st.columns(total_correlations)
+                                
+                                # Display Bitcoin correlations
+                                col_idx = 0
+                                for instrument, correlation in static_correlations.items():
+                                    with corr_metrics_cols[col_idx]:
+                                        # Color coding for correlation strength
+                                        if abs(correlation) > 0.7:
+                                            strength = "Strong"
+                                        elif abs(correlation) > 0.3:
+                                            strength = "Moderate"
+                                        else:
+                                            strength = "Weak"
+                                        
+                                        correlation_str = f"{correlation:.3f}"
+                                        st.metric(
+                                            label=f"BTC vs {instrument}",
+                                            value=correlation_str,
+                                            help=f"{strength} correlation"
+                                        )
+                                    col_idx += 1
+                                
+                                # Display traditional market correlation
+                                if has_traditional_correlation:
+                                    with corr_metrics_cols[col_idx]:
+                                        if abs(traditional_correlation) > 0.7:
+                                            strength = "Strong"
+                                        elif abs(traditional_correlation) > 0.3:
+                                            strength = "Moderate"
+                                        else:
+                                            strength = "Weak"
+                                        
+                                        traditional_corr_str = f"{traditional_correlation:.3f}"
+                                        st.metric(
+                                            label="Dow Jones vs Euro Stoxx 50",
+                                            value=traditional_corr_str,
+                                            help=f"{strength} correlation"
+                                        )
+                            
+                            # Rolling correlation chart
+                            st.markdown("#### 📈 Rolling Correlation Over Time")
+                            
+                            fig_correlation = go.Figure()
+                            
+                            colors_map = {
+                                "Dow Jones": "#1f77b4",
+                                "Euro Stoxx 50": "#ff7f0e", 
+                                "VIX": "#d62728"
+                            }
+                            
+                            # Add Bitcoin correlation traces
+                            for instrument, rolling_corr in rolling_correlations.items():
+                                fig_correlation.add_trace(go.Scatter(
+                                    x=rolling_corr.index,
+                                    y=rolling_corr.values,
+                                    mode='lines',
+                                    name=f"BTC vs {instrument}",
+                                    line=dict(color=colors_map.get(instrument, "#2ca02c"), width=2),
+                                    hovertemplate=f'<b>BTC vs {instrument}</b><br>' +
+                                                'Date: %{x}<br>' +
+                                                'Correlation: %{y:.3f}<br>' +
+                                                '<extra></extra>'
+                                ))
+                            
+                            # Add traditional market correlation trace
+                            if traditional_rolling_correlation is not None and len(traditional_rolling_correlation) > 0:
+                                fig_correlation.add_trace(go.Scatter(
+                                    x=traditional_rolling_correlation.index,
+                                    y=traditional_rolling_correlation.values,
+                                    mode='lines',
+                                    name="Dow Jones vs Euro Stoxx 50",
+                                    line=dict(color="#9467bd", width=3, dash="dot"),  # Purple dashed line
+                                    hovertemplate='<b>Dow Jones vs Euro Stoxx 50</b><br>' +
+                                                'Date: %{x}<br>' +
+                                                'Correlation: %{y:.3f}<br>' +
+                                                '<extra></extra>'
+                                ))
+                            
+                            # Add horizontal reference lines
+                            fig_correlation.add_hline(y=0, line_dash="dot", line_color="gray", 
+                                                    annotation_text="No Correlation", annotation_position="right")
+                            fig_correlation.add_hline(y=0.5, line_dash="dot", line_color="green", opacity=0.5)
+                            fig_correlation.add_hline(y=-0.5, line_dash="dot", line_color="red", opacity=0.5)
+                            
+                            fig_correlation.update_layout(
+                                title=f"Rolling Correlation Analysis ({effective_window}-day window)",
+                                xaxis_title="Date",
+                                yaxis_title="Correlation Coefficient",
+                                yaxis=dict(range=[-1, 1]),
+                                hovermode='x unified',
+                                height=500,
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                            )
+                            
+                            st.plotly_chart(fig_correlation, use_container_width=True)
+                            
+                            # Correlation analysis insights
+                            st.markdown("#### 🧠 Correlation Insights")
+                            
+                            insights_col1, insights_col2 = st.columns(2)
+                            
+                            with insights_col1:
+                                st.markdown("**Interpretation Guide:**")
+                                st.markdown("""
+                                - **+1.0**: Perfect positive correlation
+                                - **+0.7 to +1.0**: Strong positive correlation
+                                - **+0.3 to +0.7**: Moderate positive correlation  
+                                - **-0.3 to +0.3**: Weak/No correlation
+                                - **-0.7 to -0.3**: Moderate negative correlation
+                                - **-1.0 to -0.7**: Strong negative correlation
+                                - **-1.0**: Perfect negative correlation
+                                """)
+                            
+                            with insights_col2:
+                                st.markdown("**Current Analysis:**")
+                                
+                                for instrument, correlation in static_correlations.items():
+                                    if correlation > 0.5:
+                                        trend = "📈 Bitcoin tends to move UP when market rises"
+                                    elif correlation < -0.5:
+                                        trend = "📉 Bitcoin tends to move DOWN when market rises" 
+                                    else:
+                                        trend = "↔️ Bitcoin shows independent movement"
+                                    
+                                    st.markdown(f"**BTC vs {instrument}**: {trend}")
+                                
+                                # Add traditional market correlation insight
+                                if traditional_correlation is not None:
+                                    if traditional_correlation > 0.5:
+                                        trad_trend = "📈 Strong positive correlation between US and EU markets"
+                                    elif traditional_correlation < -0.5:
+                                        trad_trend = "📉 Inverse relationship between US and EU markets"
+                                    else:
+                                        trad_trend = "↔️ Independent movement between US and EU markets"
+                                    
+                                    st.markdown(f"**Traditional Markets**: {trad_trend}")
+                            
+                            # Summary statistics table
+                            st.markdown("#### 📋 Correlation Statistics Summary")
+                            
+                            stats_data = []
+                            # Add Bitcoin correlation statistics
+                            for instrument, correlation in static_correlations.items():
+                                if instrument in rolling_correlations:
+                                    rolling_data = rolling_correlations[instrument]
+                                    stats_data.append({
+                                        'Pair': f"BTC vs {instrument}",
+                                        'Current Correlation': f"{correlation:.3f}",
+                                        'Average Correlation': f"{rolling_data.mean():.3f}",
+                                        'Max Correlation': f"{rolling_data.max():.3f}",
+                                        'Min Correlation': f"{rolling_data.min():.3f}",
+                                        'Volatility': f"{rolling_data.std():.3f}"
+                                    })
+                            
+                            # Add traditional market correlation statistics
+                            if traditional_correlation is not None and traditional_rolling_correlation is not None:
+                                stats_data.append({
+                                    'Pair': "Dow Jones vs Euro Stoxx 50",
+                                    'Current Correlation': f"{traditional_correlation:.3f}",
+                                    'Average Correlation': f"{traditional_rolling_correlation.mean():.3f}",
+                                    'Max Correlation': f"{traditional_rolling_correlation.max():.3f}",
+                                    'Min Correlation': f"{traditional_rolling_correlation.min():.3f}",
+                                    'Volatility': f"{traditional_rolling_correlation.std():.3f}"
+                                })
+                            
+                            if stats_data:
+                                stats_df = pd.DataFrame(stats_data)
+                                st.dataframe(stats_df, use_container_width=True, hide_index=True)
+                            
+                            # Store correlation data for export
+                            st.session_state['btc_correlation_data'] = {
+                                'static_correlations': static_correlations,
+                                'rolling_correlations': rolling_correlations,
+                                'period': selected_corr_period_label,
+                                'window': correlation_window
+                            }
+                            
+                        else:
+                            st.error(f"Insufficient data for correlation analysis. Found {len(aligned_data)} days, need at least 30 days. Try selecting a longer time period.")
+                    else:
+                        st.error("Could not load sufficient data for Bitcoin correlation analysis.")
+                        
+                except Exception as e:
+                    st.error(f"Error calculating correlations: {str(e)}")
+        
+        # Show existing correlation data if available
+        elif 'btc_correlation_data' in st.session_state:
+            correlation_info = st.session_state['btc_correlation_data']
+            st.info(f"📊 Showing last calculated correlations for {correlation_info['period']} period with {correlation_info['window']}-day window. Click 'Calculate BTC Correlations' to refresh.")
+            
+    with correlation_col2:
+        st.markdown("#### 💡 About BTC Correlations")
+        st.markdown("""
+        **Why Track BTC Correlations?**
+        
+        🔍 **Market Integration**: See how Bitcoin relates to traditional markets
+        
+        📊 **Risk Assessment**: Understand if BTC provides portfolio diversification
+        
+        ⚡ **Volatility Insights**: VIX correlation shows risk-on/risk-off behavior
+        
+        🌍 **Global Markets**: Compare US (Dow Jones) vs European (Euro Stoxx 50) correlation
+        
+        **Key Insights:**
+        - **High positive correlation**: BTC moves with traditional markets
+        - **High negative correlation**: BTC moves opposite to traditional markets  
+        - **Low correlation**: BTC provides diversification benefits
+        - **VIX correlation**: Shows Bitcoin's risk asset characteristics
+        """)
+        
+        st.markdown("#### ⚙️ Analysis Settings")
+        st.markdown(f"""
+        **Current Settings:**
+        - Analysis Period: {selected_corr_period_label}
+        - Rolling Window: {correlation_window} days
+        - Instruments: BTC/EUR, Dow Jones, Euro Stoxx 50, VIX
+        
+        💡 **Tip**: Longer periods show structural relationships, shorter periods show recent trends.
+        """)
+    
+    # Export functionality
+    st.markdown("---")
+    st.markdown("### 💾 Export Data")
+    
+    col_export1, col_export2, col_export3 = st.columns(3)
+    
+    with col_export1:
+        if st.button("📈 Export Index Data"):
+            if 'index_data' in locals() and index_data:
+                export_index_data = []
+                for index_name, data in index_data.items():
+                    export_index_data.append({
+                        'Index': index_name,
+                        'Symbol': data['symbol'],
+                        'Current_Value': data['current_price'],
+                        'Daily_Change_Pct': data['change_pct'],
+                        'Period_Return_Pct': data['period_return'],
+                        'Volatility_Pct': data['volatility']
+                    })
+                
+                export_df = pd.DataFrame(export_index_data)
+                csv_data = export_df.to_csv(index=False)
+                
+                st.download_button(
+                    label="📄 Download Index CSV",
+                    data=csv_data,
+                    file_name=f"market_indexes_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.warning("No index data to export. Please select and load indexes first.")
+    
+    with col_export2:
+        if st.button("💱 Export Rates Data"):
+            if 'rates_data' in locals() and rates_data:
+                export_rates_data = []
+                for rate_name, data in rates_data.items():
+                    export_rates_data.append({
+                        'Rate_Pair': rate_name,
+                        'Symbol': data['symbol'],
+                        'Current_Rate': data['current_rate'],
+                        'Daily_Change_Pct': data['change_pct'],
+                        'Period_Change_Pct': data['period_change_pct']
+                    })
+                
+                export_df = pd.DataFrame(export_rates_data)
+                csv_data = export_df.to_csv(index=False)
+                
+                st.download_button(
+                    label="📄 Download Rates CSV",
+                    data=csv_data,
+                    file_name=f"currency_rates_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.warning("No rates data to export. Please select and load rates first.")
+    
+    with col_export3:
+        if st.button("🔗 Export Correlation Data"):
+            if 'btc_correlation_data' in st.session_state:
+                correlation_info = st.session_state['btc_correlation_data']
+                
+                # Export static correlations
+                static_export_data = []
+                for instrument, correlation in correlation_info['static_correlations'].items():
+                    static_export_data.append({
+                        'Market_Index': instrument,
+                        'BTC_Correlation': correlation,
+                        'Analysis_Period': correlation_info['period'],
+                        'Rolling_Window_Days': correlation_info['window']
+                    })
+                
+                static_export_df = pd.DataFrame(static_export_data)
+                csv_data = static_export_df.to_csv(index=False)
+                
+                st.download_button(
+                    label="📄 Download Correlation CSV",
+                    data=csv_data,
+                    file_name=f"btc_correlations_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.warning("No correlation data to export. Please calculate BTC correlations first.")
 
 if __name__ == "__main__":
     main()

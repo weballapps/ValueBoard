@@ -1,0 +1,92 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  claude-code-review:
+    runs-on: ubuntu-latest
+    name: Claude Code Review
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          
+      - name: Run Python linting
+        run: |
+          pip install flake8 black isort
+          # Stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Check code formatting
+          black --check --diff .
+          # Check import sorting
+          isort --check-only --diff .
+        continue-on-error: true
+        
+      - name: Run security scan
+        run: |
+          pip install bandit safety
+          # Check for security issues
+          bandit -r . -f json -o bandit-report.json || true
+          # Check for known security vulnerabilities in dependencies
+          safety check --json --output safety-report.json || true
+        continue-on-error: true
+        
+      - name: Claude Code Analysis
+        uses: anthropics/claude-code-review-action@v1
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Focus areas for Claude Code review
+          focus-areas: |
+            - Code security and vulnerability assessment
+            - Performance optimization opportunities
+            - Code maintainability and readability
+            - Python best practices and conventions
+            - Financial calculation accuracy and edge cases
+            - Error handling and input validation
+          # Files to exclude from review
+          exclude-patterns: |
+            - "*.md"
+            - "requirements.txt" 
+            - ".gitignore"
+            - ".github/**"
+          # Custom prompts for financial application
+          custom-instructions: |
+            This is a stock value investment dashboard application. Please pay special attention to:
+            1. Financial calculation accuracy and potential edge cases
+            2. Data validation for stock symbols and financial metrics
+            3. API error handling for yfinance and other external services
+            4. Security considerations for user inputs
+            5. Performance optimization for stock screening operations
+            6. Threading safety in concurrent operations
+          max-comments: 10
+          
+      - name: Upload analysis artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-analysis-reports
+          path: |
+            bandit-report.json
+            safety-report.json
+        if: always()

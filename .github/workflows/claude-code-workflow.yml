@@ -1,0 +1,194 @@
+name: Claude Code Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_description:
+        description: 'Describe the coding task for Claude'
+        required: true
+        type: string
+      focus_area:
+        description: 'Focus area for the task'
+        required: false
+        default: 'general'
+        type: choice
+        options:
+        - general
+        - performance
+        - security
+        - refactoring
+        - feature-development
+        - bug-fixing
+        - testing
+      target_files:
+        description: 'Specific files to work on (comma-separated, optional)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  claude-workflow:
+    runs-on: ubuntu-latest
+    name: Execute Claude Code Task
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Set up Python environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install flake8 black isort pytest bandit safety
+          
+      - name: Pre-task analysis
+        run: |
+          echo "## Pre-task Code Analysis" >> analysis-report.md
+          echo "### Repository Structure" >> analysis-report.md
+          find . -name "*.py" -type f | head -20 >> analysis-report.md
+          echo "" >> analysis-report.md
+          
+          echo "### Code Quality Metrics" >> analysis-report.md
+          echo "\`\`\`" >> analysis-report.md
+          find . -name "*.py" -exec wc -l {} + | tail -1 >> analysis-report.md
+          echo "\`\`\`" >> analysis-report.md
+          
+      - name: Execute Claude Code Task
+        uses: anthropics/claude-code-action@v1
+        id: claude_task
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          task: ${{ github.event.inputs.task_description }}
+          focus-area: ${{ github.event.inputs.focus_area }}
+          target-files: ${{ github.event.inputs.target_files }}
+          context: |
+            Repository: Stock Value Investment Dashboard
+            Main file: stock_value_dashboard.py
+            Framework: Streamlit
+            Key dependencies: yfinance, pandas, plotly
+            
+            Special considerations:
+            - This is a financial application requiring accuracy
+            - Uses multi-threading for stock screening performance
+            - Handles both US and international stock markets
+            - Includes company search across global exchanges
+            
+            Current architecture:
+            - Main analyzer class: ValueInvestmentAnalyzer
+            - Individual stock analysis with multiple valuation models
+            - Stock screening with configurable criteria
+            - Company search functionality
+            - ETF analysis dashboard
+          constraints: |
+            - Maintain backward compatibility with existing functions
+            - Preserve all existing functionality unless explicitly changing
+            - Follow Python best practices and PEP 8
+            - Ensure thread safety for concurrent operations
+            - Validate all user inputs
+            - Handle API failures gracefully
+          output-format: 'detailed'
+          
+      - name: Validate changes
+        run: |
+          echo "## Post-task Validation" >> analysis-report.md
+          
+          # Check Python syntax
+          echo "### Syntax Check" >> analysis-report.md
+          if python -m py_compile stock_value_dashboard.py; then
+            echo "✅ Python syntax is valid" >> analysis-report.md
+          else
+            echo "❌ Python syntax errors found" >> analysis-report.md
+          fi
+          
+          # Check imports
+          echo "### Import Check" >> analysis-report.md
+          if python -c "import stock_value_dashboard"; then
+            echo "✅ All imports successful" >> analysis-report.md
+          else
+            echo "❌ Import errors found" >> analysis-report.md
+          fi
+          
+          # Basic security scan
+          echo "### Security Scan" >> analysis-report.md
+          bandit -r . -f txt >> analysis-report.md || true
+          
+      - name: Create Pull Request
+        if: steps.claude_task.outputs.changes-made == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: claude-code-task-${{ github.run_number }}
+          title: 'Claude Code: ${{ github.event.inputs.task_description }}'
+          body: |
+            ## Claude Code Automated Task
+            
+            **Task Description:** ${{ github.event.inputs.task_description }}
+            **Focus Area:** ${{ github.event.inputs.focus_area }}
+            **Target Files:** ${{ github.event.inputs.target_files || 'Auto-detected' }}
+            
+            ### Changes Made
+            ${{ steps.claude_task.outputs.summary }}
+            
+            ### Validation Results
+            - Syntax Check: ${{ steps.claude_task.outputs.syntax-valid && '✅ Pass' || '❌ Fail' }}
+            - Import Check: ${{ steps.claude_task.outputs.imports-valid && '✅ Pass' || '❌ Fail' }}
+            - Security Scan: ${{ steps.claude_task.outputs.security-issues || 'None detected' }}
+            
+            ### Files Modified
+            ${{ steps.claude_task.outputs.files-changed }}
+            
+            ---
+            🤖 *This pull request was automatically created by Claude Code workflow*
+            
+            **Review Checklist:**
+            - [ ] Code changes implement the requested functionality correctly
+            - [ ] No breaking changes to existing functionality
+            - [ ] All tests pass (if applicable)
+            - [ ] Security considerations addressed
+            - [ ] Performance impact assessed
+            - [ ] Documentation updated (if needed)
+          draft: false
+          delete-branch: true
+          
+      - name: Comment on trigger issue
+        if: github.event.issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pullRequests } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:claude-code-task-${context.runNumber}`,
+              state: 'open'
+            });
+            
+            if (pullRequests.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `🤖 Claude Code has processed your request!\n\n**Pull Request Created:** #${pullRequests[0].number}\n**Title:** ${pullRequests[0].title}\n\n[View Pull Request](${pullRequests[0].html_url})`
+              });
+            }
+            
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-code-analysis
+          path: |
+            analysis-report.md
+            *.log
+        if: always()

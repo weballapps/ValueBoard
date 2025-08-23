@@ -1,0 +1,124 @@
+# Claude Code Configuration
+# This file configures Claude Code behavior for your repository
+
+# Project Information
+project:
+  name: "Stock Value Investment Dashboard"
+  description: "Comprehensive analysis platform for global stocks and ETFs"
+  main_language: "python"
+  framework: "streamlit"
+  
+# Code Review Settings
+review:
+  # Enable automatic reviews on PRs
+  auto_review: true
+  
+  # Focus areas for code review
+  focus_areas:
+    - security
+    - performance
+    - maintainability
+    - financial_accuracy
+    - error_handling
+    
+  # Files to exclude from review
+  exclude_patterns:
+    - "*.md"
+    - "*.txt"
+    - "*.yml" 
+    - "*.yaml"
+    - ".gitignore"
+    - "__pycache__/**"
+    - ".git/**"
+    - "venv/**"
+    - "env/**"
+    
+  # Custom review prompts
+  custom_instructions: |
+    This is a financial application for stock analysis. Please focus on:
+    
+    1. **Financial Accuracy**: Verify calculations for valuation models, ratios, and metrics
+    2. **Data Validation**: Ensure robust input validation for stock symbols and user inputs
+    3. **API Reliability**: Check error handling for yfinance and external API calls
+    4. **Performance**: Optimize concurrent operations and caching mechanisms
+    5. **Security**: Validate user inputs and prevent injection attacks
+    6. **Thread Safety**: Ensure thread-safe operations in multi-threaded screening
+    
+    Key files and their purposes:
+    - stock_value_dashboard.py: Main Streamlit application
+    - ValueInvestmentAnalyzer class: Core analysis functionality
+    - Company search: Global stock discovery across US/EU/Asia markets
+    
+# Workflow Settings  
+workflow:
+  # Default branch for deployments
+  main_branch: "main"
+  
+  # Auto-deployment settings
+  auto_deploy:
+    enabled: true
+    environment: "production"
+    service: "render"
+    
+  # Testing requirements
+  testing:
+    required: false
+    framework: "pytest"
+    coverage_threshold: 80
+    
+  # Code quality checks
+  quality_checks:
+    linting: true
+    formatting: true
+    security_scan: true
+    dependency_check: true
+    
+# Issue Templates
+issue_templates:
+  bug_report:
+    enabled: true
+    labels: ["bug", "needs-investigation"]
+    
+  feature_request:
+    enabled: true  
+    labels: ["enhancement", "needs-review"]
+    
+  claude_task:
+    enabled: true
+    labels: ["claude-code", "automation"]
+    
+# Notification Settings
+notifications:
+  # Notify on successful deployments
+  deployment_success: true
+  
+  # Notify on failed reviews
+  review_failure: true
+  
+  # Notify on security issues
+  security_alerts: true
+
+# Custom Commands
+commands:
+  # Quick deployment
+  deploy:
+    description: "Deploy to Render"
+    workflow: "deploy-render.yml"
+    
+  # Code review
+  review:
+    description: "Trigger Claude Code review"  
+    workflow: "claude-code-review.yml"
+    
+  # Custom task execution
+  task:
+    description: "Execute custom Claude Code task"
+    workflow: "claude-code-workflow.yml"
+    parameters:
+      - name: "task_description"
+        required: true
+        type: "string"
+      - name: "focus_area" 
+        required: false
+        type: "choice"
+        options: ["general", "performance", "security", "refactoring"]
