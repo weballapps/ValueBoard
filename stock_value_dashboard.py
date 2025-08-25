@@ -5103,11 +5103,35 @@ def main():
     build_time, time_source = get_build_timestamp()
     st.markdown(f"<small style='color: gray;'>Last updated: {build_time} ({time_source})</small>", unsafe_allow_html=True)
     
-    # Initialize session state for tab switching
+    # Initialize session state for tab switching and form persistence
     if 'main_tab_index' not in st.session_state:
         st.session_state.main_tab_index = 0
     if 'selected_stock_symbol' not in st.session_state:
         st.session_state.selected_stock_symbol = ''
+    
+    # Initialize Company Search tab state
+    if 'company_search_query' not in st.session_state:
+        st.session_state.company_search_query = ''
+    if 'company_search_results' not in st.session_state:
+        st.session_state.company_search_results = []
+    
+    # Initialize Individual Stock Analysis tab state  
+    if 'individual_analysis_symbol' not in st.session_state:
+        st.session_state.individual_analysis_symbol = ''
+    if 'individual_analysis_data' not in st.session_state:
+        st.session_state.individual_analysis_data = None
+        
+    # Initialize ETF Dashboard tab state
+    if 'etf_search_query' not in st.session_state:
+        st.session_state.etf_search_query = ''
+    if 'etf_selected_symbol' not in st.session_state:
+        st.session_state.etf_selected_symbol = ''
+    if 'etf_data' not in st.session_state:
+        st.session_state.etf_data = None
+    
+    # Initialize Market Indexes tab state
+    if 'market_selected_index' not in st.session_state:
+        st.session_state.market_selected_index = 'SPY'
     
     # Main navigation with session state support
     main_tab_options = ["🔍 Company Search", "📊 Individual Stock Analysis", "🎯 Stock Screening", "📈 ETF Dashboard", "📉 Market Indexes & Rates"]
@@ -5265,7 +5289,15 @@ def individual_stock_analysis():
         with col1:
             input_type = st.radio("Search by:", ["Symbol", "Company Name"], horizontal=True)
             if input_type == "Symbol":
-                symbol = st.text_input("Enter Stock Symbol:", placeholder="e.g., AAPL, MSFT, ASML.AS, SAP.DE, 7203.T, 0700.HK")
+                symbol = st.text_input(
+                    "Enter Stock Symbol:", 
+                    placeholder="e.g., AAPL, MSFT, ASML.AS, SAP.DE, 7203.T, 0700.HK",
+                    value=st.session_state.individual_analysis_symbol,
+                    key="individual_analysis_symbol_input"
+                )
+                # Update session state with current symbol
+                if symbol != st.session_state.individual_analysis_symbol:
+                    st.session_state.individual_analysis_symbol = symbol
                 # Clear selected symbol if user starts typing manually
                 if symbol and symbol != st.session_state.get('selected_stock_symbol', ''):
                     st.session_state.selected_stock_symbol = ''
@@ -6512,16 +6544,29 @@ def company_search():
         search_query = st.text_input(
             "Enter company name or partial name:",
             placeholder="e.g., Apple, Microsoft, Tesla, Toyota, Samsung, pharmaceutical companies...",
-            help="Enter any part of a company name to find matching stocks"
+            help="Enter any part of a company name to find matching stocks",
+            value=st.session_state.company_search_query,
+            key="company_search_input"
         )
     
     with col2:
         max_results = st.slider("Max results:", min_value=5, max_value=20, value=10)
     
+    # Update session state with current search query
+    if search_query != st.session_state.company_search_query:
+        st.session_state.company_search_query = search_query
+        # Reset results when query changes
+        if search_query and len(search_query) >= 2:
+            with st.spinner(f"Searching for companies matching '{search_query}'..."):
+                matches = analyzer.advanced_company_search(search_query, max_results)
+                st.session_state.company_search_results = matches if matches else []
+        else:
+            st.session_state.company_search_results = []
+    
+    # Use persisted results or current search results
+    matches = st.session_state.company_search_results
+    
     if search_query and len(search_query) >= 2:
-        with st.spinner(f"Searching for companies matching '{search_query}'..."):
-            matches = analyzer.advanced_company_search(search_query, max_results)
-        
         if matches:
             st.success(f"Found {len(matches)} matching companies")
             
@@ -7527,7 +7572,15 @@ def etf_dashboard():
         etf_input_type = st.radio("Search ETF by:", ["Symbol", "Category Browser"], horizontal=True)
         
         if etf_input_type == "Symbol":
-            etf_symbol = st.text_input("Enter ETF Symbol:", placeholder="e.g., SPY, VTI, QQQ, VXUS")
+            etf_symbol = st.text_input(
+                "Enter ETF Symbol:", 
+                placeholder="e.g., SPY, VTI, QQQ, VXUS",
+                value=st.session_state.etf_search_query,
+                key="etf_symbol_input"
+            )
+            # Update session state with current ETF symbol
+            if etf_symbol != st.session_state.etf_search_query:
+                st.session_state.etf_search_query = etf_symbol
         else:
             # Enhanced category browser with subcategories
             st.markdown("#### 📂 ETF Category Browser")
@@ -8108,13 +8161,21 @@ def market_indexes_dashboard():
             "VIX": "^VIX"
         }
         
-        # Index selection
+        # Index selection with persistent state
+        if 'market_selected_indexes' not in st.session_state:
+            st.session_state.market_selected_indexes = ["Dow Jones", "DAX", "Euro Stoxx 50", "VIX"]
+        
         selected_indexes = st.multiselect(
             "Select Indexes to Display:",
             options=list(major_indexes.keys()),
-            default=["Dow Jones", "DAX", "Euro Stoxx 50", "VIX"],
-            help="Choose which market indexes to analyze"
+            default=st.session_state.market_selected_indexes,
+            help="Choose which market indexes to analyze",
+            key="market_indexes_select"
         )
+        
+        # Update session state with selected indexes
+        if selected_indexes != st.session_state.market_selected_indexes:
+            st.session_state.market_selected_indexes = selected_indexes
         
         # Time period selection for indexes
         index_periods = {
