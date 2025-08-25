@@ -64,4 +64,4 @@ test_*.py
 *.temp
 
 # Build info (generated during deployment)
-build_info.json
+build_info.jsongit_token.txt
