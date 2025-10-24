@@ -776,18 +776,21 @@ class ValueInvestmentAnalyzer:
                         **Symbol:** {symbol}
                         
                         **Why this happens:**
-                        - Yahoo Finance has tightened restrictions in 2024
-                        - Cloud platforms (like Render) often share IP addresses that Yahoo may block
-                        - The free Yahoo Finance API has strict rate limits
+                        - Yahoo Finance blocks shared IP addresses from cloud platforms like Render
+                        - Free hosting tiers are particularly affected in late 2024
+                        - This affects ALL financial apps using free Yahoo Finance data
                         
-                        **What you can try:**
-                        1. **Wait a few minutes** and try again
-                        2. **Try a different symbol** first
-                        3. **Use the app less frequently** (Yahoo tracks usage patterns)
-                        4. **Check back later** - limits often reset after time
+                        **Solutions:**
+                        1. **Wait 10-30 minutes** and try again
+                        2. **Try during off-peak hours** (early morning/late evening)
+                        3. **Use different symbols** to test if the block is selective
+                        4. **Consider upgrading to paid hosting** with dedicated IP
                         
-                        💡 *This is a known limitation of the free Yahoo Finance data source.*
+                        💡 *This is a known infrastructure limitation affecting many apps.*
                         """)
+                        
+                        # Offer a simple workaround
+                        st.info("🔧 **Temporary Workaround:** You can manually check stock prices on [Yahoo Finance](https://finance.yahoo.com) while we wait for the block to lift.")
                         return False
                 else:
                     # Non-rate-limit errors
@@ -5544,24 +5547,39 @@ def main():
     
     # Show Yahoo Finance limitations notice
     if st.session_state.get('show_yf_notice', True):
-        with st.expander("ℹ️ Important: Data Source Limitations", expanded=False):
+        with st.expander("⚠️ Important: Free Cloud Hosting Limitations", expanded=True):
             st.markdown("""
-            **About Yahoo Finance Data:**
-            - This app uses free Yahoo Finance data which has strict rate limits
-            - In 2024, Yahoo tightened restrictions, especially for cloud deployments
-            - If you see "rate limited" errors, this is expected behavior
+            **Current Issue: Yahoo Finance blocking cloud platforms**
             
-            **Tips for best experience:**
-            - Wait a few minutes between different stock queries
-            - Try different symbols if one fails
-            - The app caches data to minimize requests
-            - Be patient - financial data access takes time
+            🚫 **Why data isn't loading:**
+            - Yahoo Finance blocks shared IP addresses from cloud platforms like Render
+            - Free hosting tiers are particularly affected
+            - This is a known issue affecting many financial apps in late 2024
             
-            💡 *This is a free service with inherent limitations.*
+            **Your options:**
+            1. **Wait and retry** - Sometimes temporary blocks lift
+            2. **Try at different times** - Less congested periods may work better  
+            3. **Use sparingly** - Minimize requests to avoid triggering blocks
+            4. **Consider paid hosting** - Dedicated IPs are less likely to be blocked
+            
+            **This affects ALL free Yahoo Finance apps on cloud platforms.**
+            
+            💡 *Unfortunately, this is a limitation of free data + free hosting.*
             """)
-            if st.button("✅ Got it, don't show again"):
-                st.session_state.show_yf_notice = False
-                st.rerun()
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ I understand"):
+                    st.session_state.show_yf_notice = False
+                    st.rerun()
+            with col2:
+                if st.button("🔄 Test Data Connection"):
+                    with st.spinner("Testing Yahoo Finance connection..."):
+                        test_analyzer = ValueInvestmentAnalyzer()
+                        if test_analyzer.fetch_stock_data("AAPL", period="1d"):
+                            st.success("✅ Connection working! Try your queries now.")
+                        else:
+                            st.error("❌ Still blocked. Please try again later.")
     
     # Initialize session state for tab switching and form persistence
     if 'main_tab_index' not in st.session_state:
