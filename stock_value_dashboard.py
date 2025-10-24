@@ -21,7 +21,7 @@ try:
     GOOGLE_SHEETS_AVAILABLE = True
 except ImportError:
     GOOGLE_SHEETS_AVAILABLE = False
-    st.warning("⚠️ Google Sheets integration not available. Install with: pip install gspread google-auth")
+    # Don't show warning immediately - only when feature is used
 
 class ValueInvestmentAnalyzer:
     def __init__(self):
