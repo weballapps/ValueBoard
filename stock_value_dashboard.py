@@ -1,5 +1,16 @@
 import streamlit as st
-import yfinance as yf
+# Enhanced Yahoo Finance import with direct API fallback
+try:
+    from yahoo_api_direct import Ticker, DirectYahooFinance
+    # Create yf-compatible interface
+    class YFinanceCompat:
+        def Ticker(self, symbol, session=None):
+            return Ticker(symbol, session)
+    yf = YFinanceCompat()
+    print("✅ Using direct Yahoo Finance API")
+except ImportError:
+    import yfinance as yf
+    print("⚠️ Using standard yfinance (may have issues)")
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
