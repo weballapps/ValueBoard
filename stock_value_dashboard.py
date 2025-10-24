@@ -665,27 +665,67 @@ class ValueInvestmentAnalyzer:
     def fetch_stock_data(self, symbol, period='2y'):
         import time
         import random
+        import os
         
-        max_retries = 3
-        base_delay = 1
+        max_retries = 5  # Increased retries
+        base_delay = 2   # Longer base delay
         
         for attempt in range(max_retries):
             try:
-                # Add small random delay to spread out requests
+                # Progressive delay with more jitter for cloud environments
                 if attempt > 0:
-                    delay = base_delay * (2 ** attempt) + random.uniform(0.1, 0.5)
+                    delay = base_delay * (2 ** attempt) + random.uniform(0.5, 2.0)
+                    st.info(f"⏳ Waiting {delay:.1f}s before retry {attempt + 1}/{max_retries} for {symbol}...")
                     time.sleep(delay)
                 
-                self.ticker = yf.Ticker(symbol)
-                self.stock_data = self.ticker.history(period=period)
-                self.stock_info = self.ticker.info
+                # Add small delay even on first attempt to avoid rapid requests
+                time.sleep(random.uniform(0.2, 0.8))
                 
-                # Check if we got valid data
-                if self.stock_data.empty or not self.stock_info:
-                    raise Exception("No data returned from API")
-                
-                # Fetch financial statements for advanced metrics
+                # Use different session and headers to avoid detection
+                import yfinance as yf
+                session = None
                 try:
+                    import requests
+                    session = requests.Session()
+                    session.headers.update({
+                        'User-Agent': f'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.5',
+                        'Accept-Encoding': 'gzip, deflate',
+                        'Connection': 'keep-alive',
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    })
+                except:
+                    pass
+                
+                self.ticker = yf.Ticker(symbol, session=session)
+                
+                # Try to get basic info first (lighter request)
+                try:
+                    self.stock_info = self.ticker.info
+                    if not self.stock_info or len(self.stock_info) < 5:
+                        raise Exception("Insufficient stock info returned")
+                except Exception as info_error:
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        raise info_error
+                
+                # Then get historical data
+                try:
+                    self.stock_data = self.ticker.history(period=period)
+                    if self.stock_data.empty:
+                        raise Exception("No historical data returned")
+                except Exception as hist_error:
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        raise hist_error
+                
+                # Fetch financial statements for advanced metrics (optional)
+                try:
+                    time.sleep(random.uniform(0.1, 0.3))  # Small delay between requests
                     self.financials = self.ticker.financials
                     self.balance_sheet = self.ticker.balance_sheet
                     self.cashflow = self.ticker.cashflow
@@ -694,22 +734,54 @@ class ValueInvestmentAnalyzer:
                     self.quarterly_balance_sheet = self.ticker.quarterly_balance_sheet
                     self.quarterly_cashflow = self.ticker.quarterly_cashflow
                 except:
-                    pass  # Some stocks may not have complete financial data
+                    # Financial data is optional - don't fail if we can't get it
+                    pass
                 
                 return True
                 
             except Exception as e:
                 error_msg = str(e).lower()
-                if "too many requests" in error_msg or "rate limit" in error_msg or "429" in error_msg:
+                
+                # More comprehensive error detection
+                is_rate_limit = any(phrase in error_msg for phrase in [
+                    "too many requests", "rate limit", "429", "blocked", 
+                    "forbidden", "403", "unauthorized", "401", "quota",
+                    "throttled", "limited", "try again"
+                ])
+                
+                if is_rate_limit:
                     if attempt < max_retries - 1:
-                        st.warning(f"Rate limited for {symbol}, retrying in {base_delay * (2 ** attempt):.1f}s... (attempt {attempt + 1}/{max_retries})")
+                        retry_time = base_delay * (2 ** attempt)
+                        st.warning(f"🚫 Yahoo Finance rate limit detected for {symbol}. This is common on cloud platforms. Retrying in {retry_time}s... (attempt {attempt + 1}/{max_retries})")
                         continue
                     else:
-                        st.error(f"Rate limit exceeded for {symbol}. Please try again in a few minutes.")
+                        # Show helpful error message for rate limits
+                        st.error("🚫 **Yahoo Finance Rate Limit Exceeded**")
+                        st.markdown(f"""
+                        **Symbol:** {symbol}
+                        
+                        **Why this happens:**
+                        - Yahoo Finance has tightened restrictions in 2024
+                        - Cloud platforms (like Render) often share IP addresses that Yahoo may block
+                        - The free Yahoo Finance API has strict rate limits
+                        
+                        **What you can try:**
+                        1. **Wait a few minutes** and try again
+                        2. **Try a different symbol** first
+                        3. **Use the app less frequently** (Yahoo tracks usage patterns)
+                        4. **Check back later** - limits often reset after time
+                        
+                        💡 *This is a known limitation of the free Yahoo Finance data source.*
+                        """)
                         return False
                 else:
-                    st.error(f"Error fetching data for {symbol}: {str(e)}")
-                    return False
+                    # Non-rate-limit errors
+                    if attempt < max_retries - 1:
+                        st.warning(f"⚠️ Error fetching {symbol}: {str(e)}. Retrying...")
+                        continue
+                    else:
+                        st.error(f"❌ Failed to fetch data for {symbol}: {str(e)}")
+                        return False
         
         return False
     
@@ -2378,27 +2450,68 @@ class ValueInvestmentAnalyzer:
         
         return value_scores[:30]  # Return top 30 value stocks
     
-    def fetch_stock_data_cached(self, symbol, max_age_minutes=30):
-        """Fetch stock data with caching to avoid repeated API calls"""
+    def fetch_stock_data_cached(self, symbol, max_age_minutes=60):
+        """Fetch stock data with aggressive caching to avoid repeated API calls"""
         with self._cache_lock:
             current_time = time.time()
             
-            # Check if we have cached data that's still fresh
+            # Check if we have cached data that's still fresh (increased cache time)
             if symbol in self._stock_cache:
                 cached_data, timestamp = self._stock_cache[symbol]
-                if current_time - timestamp < max_age_minutes * 60:
+                cache_age_minutes = (current_time - timestamp) / 60
+                
+                if cache_age_minutes < max_age_minutes:
                     # Use cached data
                     self.stock_data = cached_data.get('stock_data')
                     self.stock_info = cached_data.get('stock_info')
                     self.financials = cached_data.get('financials')
                     self.balance_sheet = cached_data.get('balance_sheet')
                     self.cashflow = cached_data.get('cashflow')
+                    st.info(f"📦 Using cached data for {symbol} (cached {cache_age_minutes:.1f} minutes ago)")
                     return True
+                elif cache_age_minutes < max_age_minutes * 2:
+                    # Use stale cached data if fresh fetch fails
+                    try:
+                        # Add throttling between requests to avoid rate limits
+                        import time
+                        import random
+                        time.sleep(random.uniform(0.3, 1.0))
+                        
+                        # Try to fetch fresh data
+                        if self.fetch_stock_data(symbol):
+                            # Cache the fresh results
+                            self._stock_cache[symbol] = ({
+                                'stock_data': self.stock_data,
+                                'stock_info': self.stock_info,
+                                'financials': self.financials,
+                                'balance_sheet': self.balance_sheet,
+                                'cashflow': self.cashflow
+                            }, current_time)
+                            return True
+                        else:
+                            # Fall back to stale data if fresh fetch fails
+                            st.warning(f"⚠️ Fresh data unavailable for {symbol}, using cached data from {cache_age_minutes:.1f} minutes ago")
+                            self.stock_data = cached_data.get('stock_data')
+                            self.stock_info = cached_data.get('stock_info')
+                            self.financials = cached_data.get('financials')
+                            self.balance_sheet = cached_data.get('balance_sheet')
+                            self.cashflow = cached_data.get('cashflow')
+                            return True
+                    except:
+                        # Fall back to stale data on any error
+                        st.warning(f"⚠️ Using cached data for {symbol} (cached {cache_age_minutes:.1f} minutes ago)")
+                        self.stock_data = cached_data.get('stock_data')
+                        self.stock_info = cached_data.get('stock_info')
+                        self.financials = cached_data.get('financials')
+                        self.balance_sheet = cached_data.get('balance_sheet')
+                        self.cashflow = cached_data.get('cashflow')
+                        return True
             
+            # No cached data available - fetch fresh
             # Add throttling between requests to avoid rate limits
             import time
             import random
-            time.sleep(random.uniform(0.1, 0.3))
+            time.sleep(random.uniform(0.3, 1.0))
             
             # Fetch fresh data
             if self.fetch_stock_data(symbol):
@@ -5413,6 +5526,27 @@ def main():
     
     build_time, time_source = get_build_timestamp()
     st.markdown(f"<small style='color: gray;'>Last updated: {build_time} ({time_source})</small>", unsafe_allow_html=True)
+    
+    # Show Yahoo Finance limitations notice
+    if st.session_state.get('show_yf_notice', True):
+        with st.expander("ℹ️ Important: Data Source Limitations", expanded=False):
+            st.markdown("""
+            **About Yahoo Finance Data:**
+            - This app uses free Yahoo Finance data which has strict rate limits
+            - In 2024, Yahoo tightened restrictions, especially for cloud deployments
+            - If you see "rate limited" errors, this is expected behavior
+            
+            **Tips for best experience:**
+            - Wait a few minutes between different stock queries
+            - Try different symbols if one fails
+            - The app caches data to minimize requests
+            - Be patient - financial data access takes time
+            
+            💡 *This is a free service with inherent limitations.*
+            """)
+            if st.button("✅ Got it, don't show again"):
+                st.session_state.show_yf_notice = False
+                st.rerun()
     
     # Initialize session state for tab switching and form persistence
     if 'main_tab_index' not in st.session_state:
