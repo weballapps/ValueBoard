@@ -46,6 +46,13 @@ class ValueInvestmentAnalyzer:
         self.cashflow = None
         self._stock_cache = {}  # Cache for stock data
         self._cache_lock = threading.Lock()  # Thread safety for cache
+        
+        # Initialize direct API for analyst recommendations
+        try:
+            from yahoo_api_direct import DirectYahooFinance
+            self.direct_api = DirectYahooFinance()
+        except ImportError:
+            self.direct_api = None
     
     def search_ticker_by_name(self, company_name):
         """Search for ticker symbol by company name using multiple approaches"""
@@ -4651,6 +4658,60 @@ class ValueInvestmentAnalyzer:
         except Exception:
             return None
     
+    def get_analyst_recommendations(self, symbol):
+        """Get analyst recommendations and target price"""
+        try:
+            # Use direct API to get analyst data
+            if hasattr(self, 'direct_api'):
+                analyst_data = self.direct_api.get_analyst_recommendations(symbol)
+            else:
+                # Fallback: try yfinance
+                try:
+                    import yfinance as yf
+                    ticker = yf.Ticker(symbol)
+                    info = ticker.info
+                    
+                    analyst_data = {}
+                    if 'targetMeanPrice' in info and info['targetMeanPrice']:
+                        analyst_data['targetMeanPrice'] = info['targetMeanPrice']
+                    if 'recommendationMean' in info and info['recommendationMean']:
+                        analyst_data['recommendationMean'] = info['recommendationMean']
+                    if 'numberOfAnalystOpinions' in info and info['numberOfAnalystOpinions']:
+                        analyst_data['numberOfAnalysts'] = info['numberOfAnalystOpinions']
+                        
+                    # If yfinance fails, use direct API fallback
+                    if not analyst_data:
+                        from yahoo_api_direct import DirectYahooFinance
+                        api = DirectYahooFinance()
+                        analyst_data = api.get_analyst_recommendations(symbol)
+                        
+                except:
+                    from yahoo_api_direct import DirectYahooFinance
+                    api = DirectYahooFinance()
+                    analyst_data = api.get_analyst_recommendations(symbol)
+            
+            return analyst_data
+            
+        except Exception as e:
+            print(f"Error fetching analyst data for {symbol}: {e}")
+            return {}
+    
+    def format_analyst_recommendation(self, rec_mean):
+        """Convert numeric recommendation to text"""
+        if rec_mean is None:
+            return "N/A", "gray"
+        
+        if rec_mean <= 1.5:
+            return "Strong Buy", "green"
+        elif rec_mean <= 2.5:
+            return "Buy", "lightgreen"
+        elif rec_mean <= 3.5:
+            return "Hold", "orange"
+        elif rec_mean <= 4.5:
+            return "Sell", "lightcoral"
+        else:
+            return "Strong Sell", "red"
+    
     def get_alternative_news_sources(self, symbol):
         """Generate alternative news source URLs for the stock"""
         base_symbol = symbol.split('.')[0]  # Remove exchange suffix for URLs
@@ -6495,6 +6556,146 @@ def individual_stock_analysis():
                                             st.warning("⚠️ Significant difference between average and median suggests some extreme valuations")
                                         else:
                                             st.info("✅ Average and median are close, indicating consistent valuations across models")
+                            
+                            # Analyst Recommendations Section
+                            st.markdown("---")
+                            st.subheader("🏦 Analyst Recommendations")
+                            
+                            try:
+                                analyst_data = analyzer.get_analyst_recommendations(symbol)
+                                
+                                if analyst_data:
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    
+                                    with col1:
+                                        if 'recommendationMean' in analyst_data:
+                                            rec_text, rec_color = analyzer.format_analyst_recommendation(analyst_data['recommendationMean'])
+                                            st.markdown(f"**Consensus Rating**")
+                                            st.markdown(f"<div style='background-color: {rec_color}; padding: 8px; border-radius: 4px; text-align: center; color: white; font-weight: bold;'>{rec_text}</div>", unsafe_allow_html=True)
+                                            if analyst_data.get('estimated'):
+                                                st.caption("*Estimated rating")
+                                        else:
+                                            st.metric("Consensus", "N/A")
+                                    
+                                    with col2:
+                                        if 'numberOfAnalysts' in analyst_data:
+                                            st.metric("Number of Analysts", f"{analyst_data['numberOfAnalysts']}")
+                                        else:
+                                            st.metric("Number of Analysts", "N/A")
+                                    
+                                    with col3:
+                                        if 'targetMeanPrice' in analyst_data:
+                                            target_price = analyst_data['targetMeanPrice']
+                                            converted_target = target_price * conversion_rate
+                                            st.metric("Mean Target Price", analyzer.format_currency(converted_target, currency_symbol))
+                                            if analyst_data.get('estimated'):
+                                                st.caption("*Estimated target")
+                                        else:
+                                            st.metric("Mean Target Price", "N/A")
+                                    
+                                    with col4:
+                                        if 'targetMeanPrice' in analyst_data and current_price:
+                                            target_price = analyst_data['targetMeanPrice']
+                                            upside = ((target_price - current_price) / current_price) * 100
+                                            color = "normal" if upside > 0 else "inverse"
+                                            st.metric("Potential Upside", f"{upside:.1f}%", delta_color=color)
+                                        else:
+                                            st.metric("Potential Upside", "N/A")
+                                    
+                                    # Add analyst target to valuation comparison if available
+                                    if 'targetMeanPrice' in analyst_data and valuation_data:
+                                        target_price = analyst_data['targetMeanPrice']
+                                        converted_target = target_price * conversion_rate
+                                        target_margin = ((target_price - current_price) / target_price) * 100
+                                        
+                                        st.markdown("### 📊 Updated Valuation Summary (Including Analyst Target)")
+                                        
+                                        # Add analyst target to the existing valuation table
+                                        enhanced_valuation_data = valuation_data.copy()
+                                        label = "Analyst Target*" if analyst_data.get('estimated') else "Analyst Target"
+                                        enhanced_valuation_data.append([label, analyzer.format_currency(converted_target, currency_symbol), f"{target_margin:.1f}%"])
+                                        
+                                        df_enhanced = pd.DataFrame(enhanced_valuation_data, columns=["Model", "Fair Value", "Margin of Safety"])
+                                        st.dataframe(df_enhanced, use_container_width=True)
+                                        
+                                        # Update the chart to include analyst target
+                                        if model_data:
+                                            fig_enhanced = go.Figure()
+                                            
+                                            # Add all existing valuation models
+                                            for data in sorted(model_data, key=lambda x: x["Fair Value"]):
+                                                color = colors.get(data['Model'], '#17becf')
+                                                fig_enhanced.add_trace(go.Bar(
+                                                    y=[data['Model']],
+                                                    x=[data['Fair Value']],
+                                                    orientation='h',
+                                                    name=data['Model'],
+                                                    marker_color=color,
+                                                    text=[analyzer.format_currency(data['Fair Value'], currency_symbol)],
+                                                    textposition='inside',
+                                                    showlegend=False,
+                                                    hovertemplate=f"{data['Model']}: {analyzer.format_currency(data['Fair Value'], currency_symbol)}<extra></extra>"
+                                                ))
+                                            
+                                            # Add analyst target
+                                            fig_enhanced.add_trace(go.Bar(
+                                                y=[label],
+                                                x=[converted_target],
+                                                orientation='h',
+                                                name=label,
+                                                marker_color='#FFD700',  # Gold color for analyst target
+                                                text=[analyzer.format_currency(converted_target, currency_symbol)],
+                                                textposition='inside',
+                                                showlegend=False,
+                                                hovertemplate=f"{label}: {analyzer.format_currency(converted_target, currency_symbol)}<extra></extra>"
+                                            ))
+                                            
+                                            # Add reference lines
+                                            fig_enhanced.add_vline(x=converted_current, line_dash="solid", line_color="red", line_width=3,
+                                                                 annotation_text=f"Current: {analyzer.format_currency(converted_current, currency_symbol)}")
+                                            fig_enhanced.add_vline(x=converted_avg, line_dash="dash", line_color="blue", line_width=2,
+                                                                 annotation_text=f"Average: {analyzer.format_currency(converted_avg, currency_symbol)}")
+                                            fig_enhanced.add_vline(x=converted_median, line_dash="dot", line_color="green", line_width=2,
+                                                                 annotation_text=f"Median: {analyzer.format_currency(converted_median, currency_symbol)}")
+                                            
+                                            fig_enhanced.update_layout(
+                                                title="Fair Value Estimates Including Analyst Target Price",
+                                                xaxis_title=f"Fair Value ({currency_symbol})",
+                                                yaxis_title="Valuation Models",
+                                                height=max(450, (len(model_data) + 1) * 50),
+                                                showlegend=False,
+                                                xaxis=dict(showgrid=True),
+                                                yaxis=dict(showgrid=False),
+                                                annotations=[
+                                                    dict(
+                                                        x=0.02, y=0.98,
+                                                        xref='paper', yref='paper',
+                                                        text="🔴 Current | 🔵 Average | 🟢 Median | 🟡 Analyst Target",
+                                                        showarrow=False,
+                                                        font=dict(size=10),
+                                                        bgcolor="white",
+                                                        bordercolor="gray",
+                                                        borderwidth=1
+                                                    )
+                                                ]
+                                            )
+                                            
+                                            st.plotly_chart(fig_enhanced, use_container_width=True)
+                                        
+                                        # Updated overall assessment including analyst view
+                                        if upside > 20:
+                                            st.success(f"🎯 **Strong Analyst Confidence** - Target price suggests {upside:.1f}% upside potential")
+                                        elif upside > 10:
+                                            st.info(f"📈 **Moderate Upside** - Analysts see {upside:.1f}% potential gain")
+                                        elif upside > -10:
+                                            st.warning(f"⚖️ **Fair Value Range** - Analyst target near current price ({upside:.1f}%)")
+                                        else:
+                                            st.error(f"📉 **Potential Overvaluation** - Analyst target suggests {abs(upside):.1f}% downside")
+                                else:
+                                    st.info("📊 Analyst recommendation data is currently unavailable for this symbol")
+                            
+                            except Exception as e:
+                                st.warning(f"⚠️ Unable to fetch analyst recommendations: Limited data availability")
                             
                             # Detailed model breakdowns
                             st.markdown("---")
