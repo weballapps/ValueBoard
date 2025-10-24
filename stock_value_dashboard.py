@@ -10,7 +10,18 @@ import concurrent.futures
 import threading
 from functools import lru_cache
 import time
+import json
+import os
 warnings.filterwarnings('ignore')
+
+# Google Sheets imports (install with: pip install gspread google-auth)
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GOOGLE_SHEETS_AVAILABLE = True
+except ImportError:
+    GOOGLE_SHEETS_AVAILABLE = False
+    st.warning("⚠️ Google Sheets integration not available. Install with: pip install gspread google-auth")
 
 class ValueInvestmentAnalyzer:
     def __init__(self):
@@ -652,27 +663,55 @@ class ValueInvestmentAnalyzer:
             return []
         
     def fetch_stock_data(self, symbol, period='2y'):
-        try:
-            self.ticker = yf.Ticker(symbol)
-            self.stock_data = self.ticker.history(period=period)
-            self.stock_info = self.ticker.info
-            
-            # Fetch financial statements for advanced metrics
+        import time
+        import random
+        
+        max_retries = 3
+        base_delay = 1
+        
+        for attempt in range(max_retries):
             try:
-                self.financials = self.ticker.financials
-                self.balance_sheet = self.ticker.balance_sheet
-                self.cashflow = self.ticker.cashflow
-                # Get quarterly data for more detailed analysis
-                self.quarterly_financials = self.ticker.quarterly_financials
-                self.quarterly_balance_sheet = self.ticker.quarterly_balance_sheet
-                self.quarterly_cashflow = self.ticker.quarterly_cashflow
-            except:
-                pass  # Some stocks may not have complete financial data
-            
-            return True
-        except Exception as e:
-            st.error(f"Error fetching data for {symbol}: {str(e)}")
-            return False
+                # Add small random delay to spread out requests
+                if attempt > 0:
+                    delay = base_delay * (2 ** attempt) + random.uniform(0.1, 0.5)
+                    time.sleep(delay)
+                
+                self.ticker = yf.Ticker(symbol)
+                self.stock_data = self.ticker.history(period=period)
+                self.stock_info = self.ticker.info
+                
+                # Check if we got valid data
+                if self.stock_data.empty or not self.stock_info:
+                    raise Exception("No data returned from API")
+                
+                # Fetch financial statements for advanced metrics
+                try:
+                    self.financials = self.ticker.financials
+                    self.balance_sheet = self.ticker.balance_sheet
+                    self.cashflow = self.ticker.cashflow
+                    # Get quarterly data for more detailed analysis
+                    self.quarterly_financials = self.ticker.quarterly_financials
+                    self.quarterly_balance_sheet = self.ticker.quarterly_balance_sheet
+                    self.quarterly_cashflow = self.ticker.quarterly_cashflow
+                except:
+                    pass  # Some stocks may not have complete financial data
+                
+                return True
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "too many requests" in error_msg or "rate limit" in error_msg or "429" in error_msg:
+                    if attempt < max_retries - 1:
+                        st.warning(f"Rate limited for {symbol}, retrying in {base_delay * (2 ** attempt):.1f}s... (attempt {attempt + 1}/{max_retries})")
+                        continue
+                    else:
+                        st.error(f"Rate limit exceeded for {symbol}. Please try again in a few minutes.")
+                        return False
+                else:
+                    st.error(f"Error fetching data for {symbol}: {str(e)}")
+                    return False
+        
+        return False
     
     def get_available_periods(self):
         """Get available historical periods for analysis"""
@@ -2355,6 +2394,11 @@ class ValueInvestmentAnalyzer:
                     self.balance_sheet = cached_data.get('balance_sheet')
                     self.cashflow = cached_data.get('cashflow')
                     return True
+            
+            # Add throttling between requests to avoid rate limits
+            import time
+            import random
+            time.sleep(random.uniform(0.1, 0.3))
             
             # Fetch fresh data
             if self.fetch_stock_data(symbol):
@@ -5099,6 +5143,273 @@ def main():
         # Final fallback: Current time
         current_time = datetime.now()
         return current_time.strftime("%Y-%m-%d %H:%M"), "live session"
+
+
+class FavoritesManager:
+    """Manages user favorites using Google Sheets for persistence"""
+    
+    def __init__(self):
+        self.sheet = None
+        self.worksheet = None
+        self.initialized = False
+        
+    def initialize_google_sheets(self):
+        """Initialize Google Sheets connection using Streamlit secrets"""
+        if not GOOGLE_SHEETS_AVAILABLE:
+            st.warning("⚠️ Google Sheets packages not installed. Using local session storage for favorites.")
+            return False
+            
+        try:
+            # Get credentials from Streamlit secrets
+            try:
+                secrets = st.secrets
+                if "google_sheets" not in secrets:
+                    st.warning("⚠️ Google Sheets not configured. Using local session storage for favorites.")
+                    st.info("💡 To enable persistent favorites, follow the setup guide in FAVORITES_SETUP.md")
+                    return False
+            except Exception:
+                # No secrets file found - this is expected for local development
+                st.info("ℹ️ Using local session storage for favorites (no persistence between sessions)")
+                st.info("💡 To enable persistent favorites, follow the setup guide in FAVORITES_SETUP.md")
+                return False
+                
+            credentials_info = dict(st.secrets["google_sheets"])
+            
+            # Set up Google Sheets API credentials
+            scope = ["https://spreadsheets.google.com/feeds",
+                    "https://www.googleapis.com/auth/drive"]
+            
+            credentials = Credentials.from_service_account_info(
+                credentials_info, scopes=scope)
+            
+            # Connect to Google Sheets
+            gc = gspread.authorize(credentials)
+            
+            # Open or create the favorites spreadsheet
+            sheet_name = st.secrets.get("favorites_sheet_name", "Stock_Favorites")
+            
+            try:
+                self.sheet = gc.open(sheet_name)
+            except gspread.SpreadsheetNotFound:
+                # Create new spreadsheet if it doesn't exist
+                self.sheet = gc.create(sheet_name)
+                st.success(f"✅ Created new Google Sheet: {sheet_name}")
+            
+            # Get or create the main worksheet
+            try:
+                self.worksheet = self.sheet.worksheet("Favorites")
+            except gspread.WorksheetNotFound:
+                # Create headers for new worksheet
+                self.worksheet = self.sheet.add_worksheet(
+                    title="Favorites", rows=1000, cols=6)
+                headers = ["user_id", "symbol", "symbol_type", "category", "company_name", "date_added"]
+                self.worksheet.append_row(headers)
+                st.success("✅ Created favorites worksheet with headers")
+            
+            self.initialized = True
+            return True
+            
+        except Exception as e:
+            st.error(f"❌ Failed to initialize Google Sheets: {str(e)}")
+            return False
+    
+    def _get_session_favorites(self):
+        """Get favorites from session state (fallback when Google Sheets unavailable)"""
+        if 'local_favorites' not in st.session_state:
+            st.session_state.local_favorites = []
+        return st.session_state.local_favorites
+    
+    def _save_session_favorites(self, favorites):
+        """Save favorites to session state (fallback when Google Sheets unavailable)"""
+        st.session_state.local_favorites = favorites
+
+    def get_all_users(self):
+        """Get list of all unique users from the sheet"""
+        if not self.initialized and not self.initialize_google_sheets():
+            # Fallback to local session storage
+            favorites = self._get_session_favorites()
+            users = list(set(fav['user_id'] for fav in favorites if fav.get('user_id')))
+            return sorted(users)
+            
+        try:
+            records = self.worksheet.get_all_records()
+            users = list(set(record['user_id'] for record in records if record['user_id']))
+            return sorted(users)
+        except Exception as e:
+            st.error(f"Error getting users: {str(e)}")
+            return []
+    
+    def get_user_favorites(self, user_id):
+        """Get all favorites for a specific user"""
+        if not self.initialized and not self.initialize_google_sheets():
+            # Fallback to local session storage
+            favorites = self._get_session_favorites()
+            user_favorites = [fav for fav in favorites if fav.get('user_id') == user_id]
+            return user_favorites
+            
+        try:
+            records = self.worksheet.get_all_records()
+            user_favorites = [record for record in records if record['user_id'] == user_id]
+            return user_favorites
+        except Exception as e:
+            st.error(f"Error getting favorites: {str(e)}")
+            return []
+    
+    def add_favorite(self, user_id, symbol, symbol_type, category, company_name):
+        """Add a new favorite for a user"""
+        if not self.initialized and not self.initialize_google_sheets():
+            # Fallback to local session storage
+            favorites = self._get_session_favorites()
+            
+            # Check if already exists
+            if any(fav.get('user_id') == user_id and fav.get('symbol') == symbol for fav in favorites):
+                return False  # Already exists
+            
+            # Add new favorite
+            date_added = datetime.now().strftime("%Y-%m-%d %H:%M")
+            new_favorite = {
+                'user_id': user_id,
+                'symbol': symbol,
+                'symbol_type': symbol_type,
+                'category': category,
+                'company_name': company_name,
+                'date_added': date_added
+            }
+            favorites.append(new_favorite)
+            self._save_session_favorites(favorites)
+            return True
+            
+        try:
+            # Check if already exists
+            existing_favorites = self.get_user_favorites(user_id)
+            if any(fav['symbol'] == symbol for fav in existing_favorites):
+                return False  # Already exists
+            
+            # Add new row
+            date_added = datetime.now().strftime("%Y-%m-%d %H:%M")
+            new_row = [user_id, symbol, symbol_type, category, company_name, date_added]
+            self.worksheet.append_row(new_row)
+            return True
+            
+        except Exception as e:
+            st.error(f"Error adding favorite: {str(e)}")
+            return False
+    
+    def remove_favorite(self, user_id, symbol):
+        """Remove a favorite for a user"""
+        if not self.initialized and not self.initialize_google_sheets():
+            # Fallback to local session storage
+            favorites = self._get_session_favorites()
+            original_length = len(favorites)
+            favorites = [fav for fav in favorites if not (fav.get('user_id') == user_id and fav.get('symbol') == symbol)]
+            
+            if len(favorites) < original_length:
+                self._save_session_favorites(favorites)
+                return True
+            return False
+            
+        try:
+            # Find and delete the row
+            records = self.worksheet.get_all_records()
+            for i, record in enumerate(records, start=2):  # Start at 2 because of header
+                if record['user_id'] == user_id and record['symbol'] == symbol:
+                    self.worksheet.delete_rows(i)
+                    return True
+            return False
+            
+        except Exception as e:
+            st.error(f"Error removing favorite: {str(e)}")
+            return False
+    
+    def update_favorite_category(self, user_id, symbol, new_category):
+        """Update the category of a favorite"""
+        if not self.initialized and not self.initialize_google_sheets():
+            # Fallback to local session storage
+            favorites = self._get_session_favorites()
+            for fav in favorites:
+                if fav.get('user_id') == user_id and fav.get('symbol') == symbol:
+                    fav['category'] = new_category
+                    self._save_session_favorites(favorites)
+                    return True
+            return False
+            
+        try:
+            # Find and update the row
+            records = self.worksheet.get_all_records()
+            for i, record in enumerate(records, start=2):  # Start at 2 because of header
+                if record['user_id'] == user_id and record['symbol'] == symbol:
+                    self.worksheet.update_cell(i, 4, new_category)  # Column 4 is category
+                    return True
+            return False
+            
+        except Exception as e:
+            st.error(f"Error updating category: {str(e)}")
+            return False
+    
+    def get_categories_for_user(self, user_id):
+        """Get all unique categories for a user"""
+        favorites = self.get_user_favorites(user_id)
+        categories = list(set(fav['category'] for fav in favorites if fav['category']))
+        return sorted(categories)
+
+
+def get_build_timestamp():
+    """Get the build timestamp from various sources"""
+    try:
+        import subprocess
+        # Production mode: Try to get from build_info.json first
+        try:
+            import json
+            import os
+            if os.path.exists('build_info.json'):
+                with open('build_info.json', 'r') as f:
+                    build_info = json.load(f)
+                    last_update = build_info.get('last_update', '')
+                    update_source = build_info.get('update_source', 'build file')
+                    if last_update:
+                        return last_update, f"{update_source} (production)"
+        except Exception:
+            pass
+        
+        # Development mode: Try to get git commit timestamp directly
+        try:
+            result = subprocess.run(['git', 'log', '-1', '--format=%ci'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                commit_time_str = result.stdout.strip().split(' +')[0]  # Remove timezone
+                commit_time = datetime.strptime(commit_time_str, "%Y-%m-%d %H:%M:%S")
+                return commit_time.strftime("%Y-%m-%d %H:%M"), "git commit (dev)"
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, ValueError):
+            pass
+        
+        # Development fallback: Use main Python file modification time
+        try:
+            main_file_path = __file__
+            if os.path.exists(main_file_path):
+                mod_time = os.path.getmtime(main_file_path)
+                file_time = datetime.fromtimestamp(mod_time)
+                return file_time.strftime("%Y-%m-%d %H:%M"), "file modified (dev)"
+        except Exception:
+            pass
+        
+        # Final fallback: Current time
+        current_time = datetime.now()
+        return current_time.strftime("%Y-%m-%d %H:%M"), "live session"
+    except Exception:
+        # Ultimate fallback
+        current_time = datetime.now()
+        return current_time.strftime("%Y-%m-%d %H:%M"), "current time"
+
+
+def main():
+    """Main application function"""
+    # Configure page layout
+    st.set_page_config(
+        page_title="Value Investment Dashboard",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="auto"
+    )
     
     build_time, time_source = get_build_timestamp()
     st.markdown(f"<small style='color: gray;'>Last updated: {build_time} ({time_source})</small>", unsafe_allow_html=True)
@@ -5133,8 +5444,14 @@ def main():
     if 'market_selected_index' not in st.session_state:
         st.session_state.market_selected_index = 'SPY'
     
+    # Initialize Favorites tab state
+    if 'current_user' not in st.session_state:
+        st.session_state.current_user = ''
+    if 'favorites_manager' not in st.session_state:
+        st.session_state.favorites_manager = FavoritesManager()
+    
     # Main navigation with session state support
-    main_tab_options = ["🔍 Company Search", "📊 Individual Stock Analysis", "🎯 Stock Screening", "📈 ETF Dashboard", "📉 Market Indexes & Rates"]
+    main_tab_options = ["🔍 Company Search", "📊 Individual Stock Analysis", "🎯 Stock Screening", "📈 ETF Dashboard", "📉 Market Indexes & Rates", "⭐ Favorites"]
     main_tab_index = st.radio(
         "Select Analysis Type:",
         range(len(main_tab_options)),
@@ -5258,6 +5575,8 @@ def main():
         stock_screening()
     elif main_tab == "📈 ETF Dashboard":
         etf_dashboard()
+    elif main_tab == "⭐ Favorites":
+        favorites_dashboard()
     else:  # Market Indexes & Rates
         market_indexes_dashboard()
 
@@ -5377,6 +5696,14 @@ def individual_stock_analysis():
                         else:
                             dividend_formatted = "N/A"
                         st.metric("Dividend Yield", dividend_formatted)
+                    
+                    # Add to Favorites button
+                    st.markdown("---")
+                    col_fav1, col_fav2, col_fav3 = st.columns([1, 2, 1])
+                    with col_fav2:
+                        company_name = stock_info.get('longName', stock_info.get('shortName', symbol))
+                        add_favorite_button(symbol, 'stock', company_name)
+                    st.markdown("---")
                     
                     # Individual Stock Analysis Tabs
                     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Price Chart", "📰 Financial News", "💰 Value Analysis", "📈 Financial Ratios", "🎯 Investment Score", "🔬 Advanced Metrics", "📊 Risk Analysis"])
@@ -6606,11 +6933,15 @@ def company_search():
                     st.write(f"Score: {match['score']}%")
                 
                 with col5:
-                    if st.button(f"📊 Analyze", key=f"analyze_{match['symbol']}", help=f"Analyze {match['symbol']}"):
-                        # Set the selected symbol and switch to Individual Analysis tab
-                        st.session_state.selected_stock_symbol = match['symbol']
-                        st.session_state.main_tab_index = 1  # Switch to Individual Stock Analysis tab
-                        st.rerun()
+                    col5a, col5b = st.columns(2)
+                    with col5a:
+                        if st.button(f"📊 Analyze", key=f"analyze_{match['symbol']}", help=f"Analyze {match['symbol']}"):
+                            # Set the selected symbol and switch to Individual Analysis tab
+                            st.session_state.selected_stock_symbol = match['symbol']
+                            st.session_state.main_tab_index = 1  # Switch to Individual Stock Analysis tab
+                            st.rerun()
+                    with col5b:
+                        add_favorite_button(match['symbol'], 'stock', match['name'])
                 
                 st.markdown("---")
             
@@ -7774,6 +8105,14 @@ def etf_dashboard():
                                 st.metric("YTD Return", ytd_formatted)
                         else:
                             st.metric("YTD Return", "N/A")
+                
+                # Add to Favorites button for ETF
+                st.markdown("---")
+                col_etf_fav1, col_etf_fav2, col_etf_fav3 = st.columns([1, 2, 1])
+                with col_etf_fav2:
+                    etf_name = etf_info.get('longName', etf_info.get('shortName', selected_etf))
+                    add_favorite_button(selected_etf, 'etf', etf_name)
+                st.markdown("---")
                 
                 # ETF specific tabs
                 etf_tab1, etf_tab2, etf_tab3 = st.tabs(["📊 Performance", "🔍 Holdings", "📈 Analysis"])
@@ -9115,6 +9454,223 @@ def market_indexes_dashboard():
                 )
             else:
                 st.warning("No correlation data to export. Please calculate BTC correlations first.")
+
+
+def favorites_dashboard():
+    """Favorites management dashboard"""
+    st.markdown("---")
+    st.markdown("### ⭐ Favorites Dashboard")
+    st.markdown("Manage your favorite stocks and ETFs with custom categories")
+    
+    favorites_manager = st.session_state.favorites_manager
+    
+    # User Management Section
+    st.markdown("#### 👤 User Selection")
+    
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        # Get existing users for autocomplete
+        existing_users = favorites_manager.get_all_users()
+        
+        # Username input with autocomplete suggestions
+        current_user = st.text_input(
+            "Enter your username:",
+            value=st.session_state.current_user,
+            placeholder="e.g., john, mary, alex",
+            help="Your username to identify your favorites"
+        )
+        
+        # Show existing users as suggestions
+        if existing_users and not current_user:
+            st.info(f"💡 Existing users: {', '.join(existing_users)}")
+    
+    with col2:
+        if st.button("✅ Set User", disabled=not current_user.strip()):
+            st.session_state.current_user = current_user.strip().lower()
+            st.success(f"✅ Switched to user: {st.session_state.current_user}")
+            st.rerun()
+    
+    with col3:
+        if existing_users:
+            selected_existing = st.selectbox(
+                "Or select existing:",
+                [""] + existing_users,
+                help="Select from existing users"
+            )
+            if selected_existing and st.button("Switch", key="switch_user"):
+                st.session_state.current_user = selected_existing
+                st.success(f"✅ Switched to user: {selected_existing}")
+                st.rerun()
+    
+    # Show current user
+    if st.session_state.current_user:
+        st.info(f"👤 Current User: **{st.session_state.current_user}**")
+        
+        # Load user's favorites
+        user_favorites = favorites_manager.get_user_favorites(st.session_state.current_user)
+        user_categories = favorites_manager.get_categories_for_user(st.session_state.current_user)
+        
+        if user_favorites:
+            st.markdown("---")
+            st.markdown("#### 📋 Your Favorites")
+            
+            # Category filter
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                category_filter = st.selectbox(
+                    "Filter by category:",
+                    ["All Categories"] + user_categories,
+                    help="Filter favorites by category"
+                )
+            
+            with col2:
+                # Add new category
+                new_category = st.text_input(
+                    "Create new category:",
+                    placeholder="e.g., Tech Stocks, Blue Chips"
+                )
+            
+            # Filter favorites by category
+            if category_filter == "All Categories":
+                filtered_favorites = user_favorites
+            else:
+                filtered_favorites = [fav for fav in user_favorites if fav.get('category', 'Uncategorized') == category_filter]
+            
+            # Display favorites in a nice table format
+            if filtered_favorites:
+                st.markdown(f"**{len(filtered_favorites)} favorites found**")
+                
+                # Group by category for better organization
+                favorites_by_category = {}
+                for fav in filtered_favorites:
+                    cat = fav.get('category', 'Uncategorized') or 'Uncategorized'
+                    if cat not in favorites_by_category:
+                        favorites_by_category[cat] = []
+                    favorites_by_category[cat].append(fav)
+                
+                # Display each category
+                for category, favorites in favorites_by_category.items():
+                    with st.expander(f"📁 {category} ({len(favorites)})", expanded=True):
+                        for fav in favorites:
+                            col1, col2, col3, col4, col5 = st.columns([2, 1, 2, 1, 1])
+                            
+                            with col1:
+                                st.write(f"**{fav['symbol']}**")
+                                company_name = fav.get('company_name', '')
+                                if company_name:
+                                    st.write(f"*{company_name}*")
+                            
+                            with col2:
+                                symbol_type = fav.get('symbol_type', 'stock')
+                                badge_color = "🔷" if symbol_type == 'stock' else "🟦"
+                                st.write(f"{badge_color} {symbol_type.upper()}")
+                            
+                            with col3:
+                                # Category editor
+                                current_category = fav.get('category', 'Uncategorized')
+                                new_cat = st.selectbox(
+                                    "Category:",
+                                    user_categories + ([new_category] if new_category else []),
+                                    index=user_categories.index(current_category) if current_category in user_categories else 0,
+                                    key=f"cat_{fav.get('symbol', '')}"
+                                )
+                                if new_cat != current_category and st.button("Update", key=f"update_cat_{fav.get('symbol', '')}"):
+                                    if favorites_manager.update_favorite_category(st.session_state.current_user, fav.get('symbol', ''), new_cat):
+                                        st.success(f"✅ Updated {fav.get('symbol', '')} category")
+                                        st.rerun()
+                            
+                            with col4:
+                                # Analyze button
+                                symbol = fav.get('symbol', '')
+                                if st.button("📊 Analyze", key=f"analyze_{symbol}"):
+                                    st.session_state.selected_stock_symbol = symbol
+                                    if symbol_type == 'stock':
+                                        st.session_state.main_tab_index = 1  # Individual Stock Analysis
+                                    else:
+                                        st.session_state.etf_search_query = symbol
+                                        st.session_state.main_tab_index = 3  # ETF Dashboard
+                                    st.rerun()
+                            
+                            with col5:
+                                # Remove button
+                                if st.button("🗑️", key=f"remove_{symbol}", help="Remove from favorites"):
+                                    if favorites_manager.remove_favorite(st.session_state.current_user, symbol):
+                                        st.success(f"✅ Removed {symbol}")
+                                        st.rerun()
+                            
+                            st.markdown("---")
+            else:
+                st.info("No favorites found in this category.")
+        
+        else:
+            st.info("🌟 No favorites yet! Add some from the other tabs.")
+            st.markdown("💡 **How to add favorites:**")
+            st.markdown("- Go to Individual Stock Analysis or ETF Dashboard")
+            st.markdown("- Search for stocks/ETFs you like")
+            st.markdown("- Click the ⭐ 'Add to Favorites' button")
+    
+    else:
+        st.warning("👤 Please enter your username above to manage favorites")
+        
+        # Show some help information
+        st.markdown("### 💡 About Favorites")
+        st.markdown("""
+        **Features:**
+        - 🏷️ **Categories**: Organize favorites into custom categories
+        - 👥 **Multi-user**: Each user has their own favorites
+        - 💾 **Persistent**: Favorites are saved between sessions
+        - 🔄 **Sync**: Works across all deployments
+        - 📊 **Quick Analysis**: Jump directly to analysis from favorites
+        
+        **Getting Started:**
+        1. Enter your username above
+        2. Go to other tabs to find interesting stocks/ETFs
+        3. Click ⭐ "Add to Favorites" buttons
+        4. Come back here to organize and manage them
+        """)
+
+
+def add_favorite_button(symbol, symbol_type, company_name=""):
+    """Helper function to add favorite button to other tabs"""
+    if not st.session_state.current_user:
+        return False
+        
+    favorites_manager = st.session_state.favorites_manager
+    
+    # Check if already in favorites
+    user_favorites = favorites_manager.get_user_favorites(st.session_state.current_user)
+    is_favorited = any(fav.get('symbol') == symbol for fav in user_favorites)
+    
+    if is_favorited:
+        if st.button(f"⭐ In Favorites", key=f"fav_{symbol}", disabled=True):
+            pass
+        return True
+    else:
+        if st.button(f"⭐ Add to Favorites", key=f"fav_{symbol}"):
+            # Get user categories for selection
+            user_categories = favorites_manager.get_categories_for_user(st.session_state.current_user)
+            default_categories = ["Tech", "Finance", "Healthcare", "Energy", "Consumer", "Industrial"]
+            
+            # Use existing categories or defaults
+            available_categories = user_categories if user_categories else default_categories
+            
+            # For now, add to first category or "Uncategorized"
+            default_category = available_categories[0] if available_categories else "Uncategorized"
+            
+            if favorites_manager.add_favorite(
+                st.session_state.current_user, 
+                symbol, 
+                symbol_type, 
+                default_category, 
+                company_name
+            ):
+                st.success(f"✅ Added {symbol} to favorites!")
+                st.rerun()
+            else:
+                st.error(f"❌ Failed to add {symbol} to favorites")
+        return False
+
 
 if __name__ == "__main__":
     main()
