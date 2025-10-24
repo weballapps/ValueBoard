@@ -165,6 +165,7 @@ class DirectYahooFinance:
         data_sources = [
             self._try_api_approach,
             self._try_alternative_apis,
+            self._try_web_scraping_for_fundamentals,
             self._try_basic_calculations
         ]
         
@@ -173,11 +174,17 @@ class DirectYahooFinance:
                 enhanced_info = source_func(symbol, info)
                 if enhanced_info and len(enhanced_info) > len(info):
                     info = enhanced_info
-                    break
+                    
+                    # Check if we have enough fundamental data to skip further attempts
+                    fundamental_metrics = ['trailingPE', 'forwardPE', 'priceToBook', 'marketCap', 'dividendYield']
+                    found_metrics = sum(1 for metric in fundamental_metrics if info.get(metric) is not None and info.get(metric) != 0)
+                    
+                    if found_metrics >= 3:  # If we have good fundamental data, stop here
+                        break
             except Exception as e:
                 continue
         
-        # No fallback estimates - only return real data that we actually fetched
+        # Return only real data that we actually fetched
         return info
     
     def _try_api_approach(self, symbol, quote):
@@ -332,6 +339,194 @@ class DirectYahooFinance:
                 info['priceToBook'] = current_price / bv
         
         return info
+    
+    def _try_web_scraping_for_fundamentals(self, symbol, info):
+        """Try to extract real fundamental data from Yahoo Finance web pages"""
+        try:
+            # Try the main quote page and key statistics page
+            pages_to_try = [
+                f"https://finance.yahoo.com/quote/{symbol}",
+                f"https://finance.yahoo.com/quote/{symbol}/key-statistics"
+            ]
+            
+            for url in pages_to_try:
+                try:
+                    response = self.session.get(url, timeout=10)
+                    if response.status_code != 200:
+                        continue
+                    
+                    html = response.text
+                    
+                    # Extract fundamental data using multiple approaches
+                    extracted_data = self._extract_fundamentals_from_html(html)
+                    
+                    # Merge any real data found
+                    for key, value in extracted_data.items():
+                        if value is not None and value != 0 and key not in info:
+                            info[key] = value
+                    
+                    # If we found substantial fundamental data, return it
+                    fundamental_count = sum(1 for key in ['trailingPE', 'priceToBook', 'marketCap', 'dividendYield'] 
+                                          if info.get(key) is not None and info.get(key) != 0)
+                    if fundamental_count >= 2:
+                        break
+                        
+                except Exception as e:
+                    continue
+            
+            return info
+            
+        except Exception as e:
+            return info
+    
+    def _extract_fundamentals_from_html(self, html):
+        """Extract fundamental metrics from HTML using various patterns"""
+        import re
+        import json
+        
+        fundamentals = {}
+        
+        # Method 1: Look for JSON data embedded in the HTML
+        json_patterns = [
+            r'root\.App\.main\s*=\s*(\{.*?\});',
+            r'"QuoteSummaryStore":\s*(\{.*?"summaryDetail"[^}]*\})',
+            r'"defaultKeyStatistics":\s*(\{.*?\})',
+            r'"summaryDetail":\s*(\{.*?\})',
+            r'"financialData":\s*(\{.*?\})'
+        ]
+        
+        for pattern in json_patterns:
+            matches = re.finditer(pattern, html, re.DOTALL)
+            for match in matches:
+                try:
+                    json_str = match.group(1)
+                    # Try to parse as JSON
+                    data = json.loads(json_str)
+                    extracted = self._extract_from_json_recursive(data)
+                    fundamentals.update(extracted)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+        
+        # Method 2: Look for specific patterns in visible text
+        text_patterns = {
+            'trailingPE': [
+                r'P/E\s*(?:Ratio)?\s*(?:\(ttm\))?\s*</?\w*>\s*([0-9.,]+)',
+                r'Trailing P/E.*?([0-9.,]+)',
+                r'PE.*?([0-9.,]+)',
+                r'pe-ratio[^>]*>([0-9.,]+)'
+            ],
+            'forwardPE': [
+                r'Forward P/E.*?([0-9.,]+)',
+                r'Forward PE.*?([0-9.,]+)'
+            ],
+            'priceToBook': [
+                r'Price/Book.*?([0-9.,]+)',
+                r'P/B.*?([0-9.,]+)',
+                r'Book.*?([0-9.,]+)'
+            ],
+            'marketCap': [
+                r'Market Cap.*?\$([0-9.,KMBT]+)',
+                r'Market Capitalization.*?\$([0-9.,KMBT]+)',
+                r'Mkt Cap.*?\$([0-9.,KMBT]+)'
+            ],
+            'dividendYield': [
+                r'Dividend.*?Yield.*?([0-9.,]+)%',
+                r'Yield.*?([0-9.,]+)%',
+                r'dividend.*?([0-9.,]+)%'
+            ]
+        }
+        
+        for metric, patterns in text_patterns.items():
+            if metric in fundamentals:  # Skip if already found
+                continue
+                
+            for pattern in patterns:
+                matches = re.findall(pattern, html, re.IGNORECASE | re.DOTALL)
+                for match in matches:
+                    try:
+                        value_str = match.replace(',', '')
+                        
+                        # Handle market cap suffixes
+                        if metric == 'marketCap':
+                            if value_str.endswith('K'):
+                                value = float(value_str[:-1]) * 1000
+                            elif value_str.endswith('M'):
+                                value = float(value_str[:-1]) * 1000000
+                            elif value_str.endswith('B'):
+                                value = float(value_str[:-1]) * 1000000000
+                            elif value_str.endswith('T'):
+                                value = float(value_str[:-1]) * 1000000000000
+                            else:
+                                value = float(value_str)
+                        elif metric == 'dividendYield':
+                            value = float(value_str) / 100  # Convert percentage to decimal
+                        else:
+                            value = float(value_str)
+                        
+                        # Sanity check the values
+                        if metric == 'trailingPE' and 1 <= value <= 1000:
+                            fundamentals[metric] = value
+                            break
+                        elif metric == 'priceToBook' and 0.1 <= value <= 100:
+                            fundamentals[metric] = value
+                            break
+                        elif metric == 'marketCap' and value > 1000000:  # At least $1M
+                            fundamentals[metric] = value
+                            break
+                        elif metric == 'dividendYield' and 0 <= value <= 0.2:  # 0-20%
+                            fundamentals[metric] = value
+                            break
+                        elif metric == 'forwardPE' and 1 <= value <= 1000:
+                            fundamentals[metric] = value
+                            break
+                            
+                    except (ValueError, AttributeError):
+                        continue
+        
+        return fundamentals
+    
+    def _extract_from_json_recursive(self, data, fundamentals=None):
+        """Recursively extract financial metrics from JSON data"""
+        if fundamentals is None:
+            fundamentals = {}
+        
+        if isinstance(data, dict):
+            # Look for direct metrics
+            target_metrics = {
+                'trailingPE': ['trailingPE', 'trailingPe'],
+                'forwardPE': ['forwardPE', 'forwardPe'], 
+                'priceToBook': ['priceToBook', 'priceToBookRatio'],
+                'marketCap': ['marketCap', 'marketCapitalization'],
+                'dividendYield': ['dividendYield', 'yield'],
+                'trailingEps': ['trailingEps', 'epsTrailingTwelveMonths']
+            }
+            
+            for our_key, possible_keys in target_metrics.items():
+                if our_key in fundamentals:  # Already found
+                    continue
+                    
+                for key in possible_keys:
+                    if key in data:
+                        value = data[key]
+                        # Handle nested objects with 'raw' field
+                        if isinstance(value, dict) and 'raw' in value:
+                            value = value['raw']
+                        
+                        if value is not None and isinstance(value, (int, float)) and value != 0:
+                            fundamentals[our_key] = value
+                            break
+            
+            # Recurse into nested objects
+            for key, value in data.items():
+                if isinstance(value, (dict, list)):
+                    self._extract_from_json_recursive(value, fundamentals)
+        
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, (dict, list)):
+                    self._extract_from_json_recursive(item, fundamentals)
+        
+        return fundamentals
     
     def _add_intelligent_estimates(self, symbol, info):
         """Add intelligent estimates only as final fallback"""
@@ -844,51 +1039,136 @@ class DirectYahooFinance:
         return dividend_yields.get(symbol, 0.015)  # 1.5% default
     
     def get_analyst_recommendations(self, symbol):
-        """Get analyst recommendations and target price"""
-        # Try multiple Yahoo Finance endpoints for analyst data
-        endpoints = [
-            f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules=upgradeDowngradeHistory,financialData",
-            f"https://query1.finance.yahoo.com/v7/finance/options/{symbol}",
-            f"https://query2.finance.yahoo.com/v6/finance/recommendationsbysymbol/{symbol}"
-        ]
-        
+        """Get analyst recommendations and target price from real sources"""
         analyst_data = {}
         
-        for url in endpoints:
+        # Try API endpoints first
+        api_endpoints = [
+            f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules=upgradeDowngradeHistory,financialData",
+            f"https://query1.finance.yahoo.com/v7/finance/options/{symbol}"
+        ]
+        
+        for url in api_endpoints:
             try:
                 data = self._make_request(url)
-                if data:
-                    # Parse different response structures
-                    if 'quoteSummary' in data:
-                        result = data['quoteSummary']['result']
-                        if result and len(result) > 0:
-                            if 'financialData' in result[0]:
-                                financial_data = result[0]['financialData']
-                                if 'targetMeanPrice' in financial_data:
-                                    target_price = financial_data['targetMeanPrice']
-                                    if isinstance(target_price, dict) and 'raw' in target_price:
-                                        analyst_data['targetMeanPrice'] = target_price['raw']
-                                if 'recommendationMean' in financial_data:
-                                    rec_mean = financial_data['recommendationMean']
-                                    if isinstance(rec_mean, dict) and 'raw' in rec_mean:
-                                        analyst_data['recommendationMean'] = rec_mean['raw']
-                                if 'numberOfAnalystOpinions' in financial_data:
-                                    num_analysts = financial_data['numberOfAnalystOpinions']
-                                    if isinstance(num_analysts, dict) and 'raw' in num_analysts:
-                                        analyst_data['numberOfAnalysts'] = num_analysts['raw']
-                    
-                    # Try to get upgrade/downgrade history
-                    if 'upgradeDowngradeHistory' in result[0]:
-                        upgrade_data = result[0]['upgradeDowngradeHistory']
-                        if 'history' in upgrade_data:
-                            analyst_data['recentChanges'] = upgrade_data['history'][:5]  # Last 5 changes
-                    
-                    break  # If we got data, don't try other endpoints
+                if data and 'quoteSummary' in data:
+                    result = data['quoteSummary']['result']
+                    if result and len(result) > 0:
+                        if 'financialData' in result[0]:
+                            financial_data = result[0]['financialData']
+                            if 'targetMeanPrice' in financial_data:
+                                target_price = financial_data['targetMeanPrice']
+                                if isinstance(target_price, dict) and 'raw' in target_price:
+                                    analyst_data['targetMeanPrice'] = target_price['raw']
+                            if 'recommendationMean' in financial_data:
+                                rec_mean = financial_data['recommendationMean']
+                                if isinstance(rec_mean, dict) and 'raw' in rec_mean:
+                                    analyst_data['recommendationMean'] = rec_mean['raw']
+                            if 'numberOfAnalystOpinions' in financial_data:
+                                num_analysts = financial_data['numberOfAnalystOpinions']
+                                if isinstance(num_analysts, dict) and 'raw' in num_analysts:
+                                    analyst_data['numberOfAnalysts'] = num_analysts['raw']
+                        
+                        if 'upgradeDowngradeHistory' in result[0]:
+                            upgrade_data = result[0]['upgradeDowngradeHistory']
+                            if 'history' in upgrade_data:
+                                analyst_data['recentChanges'] = upgrade_data['history'][:5]
+                        
+                        if analyst_data:  # If we got some data, return it
+                            return analyst_data
             except Exception as e:
                 continue
         
-        # Only return real analyst data if found, no estimates
+        # If API fails, try web scraping the main Yahoo Finance page
+        if not analyst_data:
+            analyst_data = self._scrape_analyst_data_from_web(symbol)
+        
         return analyst_data
+    
+    def _scrape_analyst_data_from_web(self, symbol):
+        """Scrape analyst data from Yahoo Finance web page"""
+        try:
+            url = f"https://finance.yahoo.com/quote/{symbol}"
+            response = self.session.get(url, timeout=15)
+            
+            if response.status_code != 200:
+                return {}
+            
+            html = response.text
+            analyst_data = {}
+            
+            import re
+            
+            # Look for analyst recommendation data in the HTML
+            # Yahoo Finance often embeds this in JSON within script tags
+            json_patterns = [
+                r'\"recommendationTrend\":\s*\{[^}]*\"trend\":\s*\[([^\]]+)\]',
+                r'\"financialData\":\s*\{[^}]*\"targetMeanPrice\":\s*\{[^}]*\"raw\":\s*([0-9.]+)',
+                r'\"financialData\":\s*\{[^}]*\"recommendationMean\":\s*\{[^}]*\"raw\":\s*([0-9.]+)',
+                r'\"financialData\":\s*\{[^}]*\"numberOfAnalystOpinions\":\s*\{[^}]*\"raw\":\s*([0-9]+)'
+            ]
+            
+            # Look for target price
+            target_patterns = [
+                r'Price Target.*?\$([0-9,.]+)',
+                r'Target.*?\$([0-9,.]+)',
+                r'target.*?price.*?\$([0-9,.]+)',
+                r'\"targetMeanPrice\"[^}]*\"raw\":\s*([0-9.]+)'
+            ]
+            
+            for pattern in target_patterns:
+                match = re.search(pattern, html, re.IGNORECASE)
+                if match:
+                    try:
+                        target_price = float(match.group(1).replace(',', ''))
+                        analyst_data['targetMeanPrice'] = target_price
+                        break
+                    except ValueError:
+                        continue
+            
+            # Look for recommendation mean
+            rec_patterns = [
+                r'\"recommendationMean\"[^}]*\"raw\":\s*([0-9.]+)',
+                r'recommendation.*?([0-9.]+)',
+                r'\"recommendation\":\s*([0-9.]+)'
+            ]
+            
+            for pattern in rec_patterns:
+                match = re.search(pattern, html, re.IGNORECASE)
+                if match:
+                    try:
+                        rec_mean = float(match.group(1))
+                        analyst_data['recommendationMean'] = rec_mean
+                        break
+                    except ValueError:
+                        continue
+            
+            # Look for number of analysts
+            analyst_count_patterns = [
+                r'\"numberOfAnalystOpinions\"[^}]*\"raw\":\s*([0-9]+)',
+                r'([0-9]+)\s*analyst',
+                r'analyst.*?([0-9]+)',
+                r'\"numBrokerStocksRecommendations\":\s*([0-9]+)'
+            ]
+            
+            for pattern in analyst_count_patterns:
+                matches = re.findall(pattern, html, re.IGNORECASE)
+                for match in matches:
+                    try:
+                        num_analysts = int(match)
+                        if 1 <= num_analysts <= 100:  # Reasonable range
+                            analyst_data['numberOfAnalysts'] = num_analysts
+                            break
+                    except ValueError:
+                        continue
+                if 'numberOfAnalysts' in analyst_data:
+                    break
+            
+            return analyst_data
+            
+        except Exception as e:
+            print(f"Web scraping analyst data failed for {symbol}: {e}")
+            return {}
     
     def _estimate_analyst_data(self, symbol):
         """Provide estimated analyst recommendations when API data is unavailable"""
