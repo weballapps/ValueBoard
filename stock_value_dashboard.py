@@ -5890,7 +5890,7 @@ def individual_stock_analysis():
                     st.markdown("---")
                     col_fav1, col_fav2, col_fav3 = st.columns([1, 2, 1])
                     with col_fav2:
-                        company_name = stock_info.get('longName', stock_info.get('shortName', symbol))
+                        company_name = analyzer.stock_info.get('longName', analyzer.stock_info.get('shortName', symbol))
                         add_favorite_button(symbol, 'stock', company_name)
                     st.markdown("---")
                     
