@@ -161,12 +161,10 @@ class DirectYahooFinance:
         
         info = quote.copy()
         
-        # Try multiple data sources in order of preference
+        # Only try reliable data sources - skip unreliable web scraping
         data_sources = [
             self._try_api_approach,
-            self._try_alternative_apis,
-            self._try_web_scraping_for_fundamentals,
-            self._try_basic_calculations
+            self._try_alternative_apis
         ]
         
         for source_func in data_sources:
@@ -174,17 +172,11 @@ class DirectYahooFinance:
                 enhanced_info = source_func(symbol, info)
                 if enhanced_info and len(enhanced_info) > len(info):
                     info = enhanced_info
-                    
-                    # Check if we have enough fundamental data to skip further attempts
-                    fundamental_metrics = ['trailingPE', 'forwardPE', 'priceToBook', 'marketCap', 'dividendYield']
-                    found_metrics = sum(1 for metric in fundamental_metrics if info.get(metric) is not None and info.get(metric) != 0)
-                    
-                    if found_metrics >= 3:  # If we have good fundamental data, stop here
-                        break
+                    break  # Use first successful source
             except Exception as e:
                 continue
         
-        # Return only real data that we actually fetched
+        # Return only reliable data - no web scraping of fundamentals
         return info
     
     def _try_api_approach(self, symbol, quote):
