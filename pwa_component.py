@@ -91,7 +91,5 @@ def inject_pwa():
     
     components.html(pwa_html, height=0)
 
-# Auto-inject PWA when this module is imported
-if 'pwa_injected' not in st.session_state:
-    inject_pwa()
-    st.session_state.pwa_injected = True
+# Don't auto-inject to avoid set_page_config conflicts
+# Call inject_pwa() manually after set_page_config()

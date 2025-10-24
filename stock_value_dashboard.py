@@ -14,11 +14,7 @@ import json
 import os
 warnings.filterwarnings('ignore')
 
-# Import PWA component for mobile app support
-try:
-    import pwa_component  # This enables mobile app installation
-except ImportError:
-    pass  # PWA features not available
+# PWA component will be imported after set_page_config to avoid conflicts
 
 # Google Sheets imports (install with: pip install gspread google-auth)
 try:
@@ -5547,6 +5543,15 @@ def main():
         layout="wide",
         initial_sidebar_state="auto"
     )
+    
+    # Initialize PWA features after set_page_config
+    try:
+        import pwa_component
+        if 'pwa_injected' not in st.session_state:
+            pwa_component.inject_pwa()
+            st.session_state.pwa_injected = True
+    except ImportError:
+        pass  # PWA features not available
     
     build_time, time_source = get_build_timestamp()
     st.markdown(f"<small style='color: gray;'>Last updated: {build_time} ({time_source})</small>", unsafe_allow_html=True)
