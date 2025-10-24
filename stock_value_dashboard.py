@@ -14,6 +14,12 @@ import json
 import os
 warnings.filterwarnings('ignore')
 
+# Import PWA component for mobile app support
+try:
+    import pwa_component  # This enables mobile app installation
+except ImportError:
+    pass  # PWA features not available
+
 # Google Sheets imports (install with: pip install gspread google-auth)
 try:
     import gspread
