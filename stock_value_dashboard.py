@@ -50,7 +50,7 @@ class ValueInvestmentAnalyzer:
     def search_ticker_by_name(self, company_name):
         """Search for ticker symbol by company name using multiple approaches"""
         try:
-            import yfinance as yf
+            # yf is already imported globally with our direct API
             import unicodedata
             import requests
             import json
@@ -695,7 +695,7 @@ class ValueInvestmentAnalyzer:
                 time.sleep(random.uniform(0.2, 0.8))
                 
                 # Use different session and headers to avoid detection
-                import yfinance as yf
+                # Note: yf is already imported globally with our direct API
                 session = None
                 try:
                     import requests
