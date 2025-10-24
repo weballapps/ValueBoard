@@ -177,10 +177,7 @@ class DirectYahooFinance:
             except Exception as e:
                 continue
         
-        # Final fallback: intelligent estimates only if we have minimal data
-        if len([k for k, v in info.items() if k.startswith(('trailing', 'forward', 'price', 'market', 'book', 'dividend'))]) < 3:
-            info = self._add_intelligent_estimates(symbol, info)
-        
+        # No fallback estimates - only return real data that we actually fetched
         return info
     
     def _try_api_approach(self, symbol, quote):
@@ -890,10 +887,7 @@ class DirectYahooFinance:
             except Exception as e:
                 continue
         
-        # If direct API doesn't work, provide estimated analyst data
-        if not analyst_data:
-            analyst_data = self._estimate_analyst_data(symbol)
-        
+        # Only return real analyst data if found, no estimates
         return analyst_data
     
     def _estimate_analyst_data(self, symbol):

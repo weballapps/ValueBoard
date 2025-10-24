@@ -4690,7 +4690,8 @@ class ValueInvestmentAnalyzer:
                     api = DirectYahooFinance()
                     analyst_data = api.get_analyst_recommendations(symbol)
             
-            return analyst_data
+            # Only return data if we actually found real analyst information
+            return analyst_data if analyst_data else {}
             
         except Exception as e:
             print(f"Error fetching analyst data for {symbol}: {e}")
@@ -6564,7 +6565,7 @@ def individual_stock_analysis():
                             try:
                                 analyst_data = analyzer.get_analyst_recommendations(symbol)
                                 
-                                if analyst_data:
+                                if analyst_data and len(analyst_data) > 0:
                                     col1, col2, col3, col4 = st.columns(4)
                                     
                                     with col1:
